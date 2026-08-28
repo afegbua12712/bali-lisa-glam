@@ -10,8 +10,21 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+<<<<<<< HEAD
 *.local
 
+=======
+.output
+.vinxi
+.tanstack/**
+.nitro
+*.local
+
+# Wrangler / Cloudflare
+.wrangler/
+.dev.vars
+
+>>>>>>> a4555619ce9cb3dbd9accc4fede2799b75dcfed8
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
