@@ -173,6 +173,14 @@ export default function App() {
     return () => window.removeEventListener("blg:checkout-complete", clearCart);
   }, []);
   useEffect(() => {
+    if (!menu) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setMenu(false); };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => { document.body.style.overflow = previousOverflow; window.removeEventListener("keydown", closeOnEscape); };
+  }, [menu]);
+  useEffect(() => {
     const load = async () => {
       try {
         const { user: authUser, profile } = await getProfile();
@@ -223,7 +231,8 @@ export default function App() {
       {menu && (
         <>
         <button className="mobile-menu-scrim" aria-label="Close navigation menu" onClick={() => setMenu(false)} />
-        <div className="mobile-menu" role="dialog" aria-label="Mobile navigation">
+        <div className="mobile-menu" role="dialog" aria-modal="true" aria-label="Mobile navigation">
+          <div className="mobile-menu-head"><span>BALI & LISA <i>GLAM</i></span><button type="button" aria-label="Close navigation menu" onClick={() => setMenu(false)}><X size={21} /></button></div>
           {["Shop all", "Complexion", "Lips", "Eyes", "Skincare", "Our story", "Beauty guide", "Account", ...(isAdmin ? ["Studio"] : [])].map((x) => (
             <button
               key={x}
