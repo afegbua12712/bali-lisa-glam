@@ -48,10 +48,13 @@ export async function getProfile() {
 export async function getAdminMetrics() {
   const [{ count: customerCount, error: customerError }, { data: products, error: productError }, { data: orders, error: orderError }] = await Promise.all([
     supabase.from('profiles').select('*', { count: 'exact', head: true }),
-    supabase.from('products').select('id,name,price_cents,inventory_quantity,is_active,categories(name)').order('updated_at', { ascending: false }).limit(5),
-    supabase.from('orders').select('id,total_cents,status,created_at').order('created_at', { ascending: false }),
+    supabase.from('products').select('id,name,price_cents,inventory_quantity,is_active,image_url,categories(name)').order('updated_at', { ascending: false }),
+    supabase.from('orders').select('id,total_cents,status,payment_status,archived_at,created_at').order('created_at', { ascending: false }),
   ])
   if (customerError || productError || orderError) throw customerError ?? productError ?? orderError
-  const paid = (orders ?? []).filter(order => order.status === 'paid' || order.status === 'fulfilled')
-  return { customers: customerCount ?? 0, products: products ?? [], orders: orders ?? [], sales: paid.reduce((total, order) => total + order.total_cents, 0) / 100 }
+  const typedOrders = (orders ?? []) as Array<{ id: string; total_cents: number; status: string; payment_status: string | null; archived_at: string | null; created_at: string }>
+  const catalog = products ?? []
+  const activeOrders = typedOrders.filter(order => !order.archived_at)
+  const paid = typedOrders.filter(order => order.payment_status === 'paid')
+  return { customers: customerCount ?? 0, products: catalog, orders: typedOrders, activeOrders, paidOrders: paid.length, awaitingPayment: activeOrders.filter(order => order.payment_status === 'awaiting_payment').length, activeProducts: catalog.filter(product => product.is_active).length, lowStock: catalog.filter(product => product.inventory_quantity <= 5).length, sales: paid.reduce((total, order) => total + order.total_cents, 0) / 100 }
 }
