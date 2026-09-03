@@ -1,0 +1,63 @@
+/* Final responsive precedence layer for the mounted storefront. */
+html, body, #root { max-width: 100%; overflow-x: hidden; }
+.product-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.product-info > div { min-width: 0; }
+.product-info button { display: block; overflow-wrap: normal; word-break: normal; hyphens: none; line-height: 1.28; }
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .product-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .category-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (min-width: 360px) and (max-width: 767px) {
+  .header nav { display: none !important; }
+  .mobile { display: grid !important; }
+  .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 27px 14px; }
+  .category-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .category-card { aspect-ratio: .92; }
+  .category-card span { left: 13px; bottom: 13px; font-size: clamp(17px, 5.3vw, 22px); line-height: 1.08; }
+  .category-card svg { right: 12px; bottom: 13px; width: 18px; }
+  .product-info { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; margin-top: 12px; }
+  .product-info p { font-size: 10px; margin-bottom: 5px; }
+  .product-info button { font-size: clamp(15px, 4.4vw, 18px); }
+  .product-info strong { font-size: 14px; padding-top: 1px; }
+  .card-bottom { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; margin-top: 8px; }
+  .rating { font-size: 12px; }
+  .card-bottom button { min-height: 42px; padding: 4px 0; font-size: 12px; white-space: nowrap; letter-spacing: .05em; }
+  .product-img { aspect-ratio: .86; }
+  .shop .toolbar { gap: 10px; }
+  .shop .pills { max-width: 100%; }
+  .detail-grid { grid-template-columns: 1fr; gap: 26px; }
+  .gallery { width: 100%; height: min(118vw, 500px); }
+  .details { width: 100%; padding: 0; }
+  .details h1 { font-size: clamp(35px, 10vw, 47px); }
+  .purchase { position: static; margin: 28px 0; padding: 0; box-shadow: none; background: transparent; }
+}
+
+@media (max-width: 359px) {
+  .header nav { display: none !important; }
+  .mobile { display: grid !important; }
+  .product-grid { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .category-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+  .category-card { aspect-ratio: .9; }
+  .category-card span { left: 10px; bottom: 10px; font-size: 16px; line-height: 1.08; }
+  .category-card svg { right: 10px; bottom: 10px; width: 16px; }
+  .product-info { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 9px; }
+  .product-info button { font-size: 18px; }
+  .product-info strong { font-size: 15px; }
+  .card-bottom { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+  .card-bottom button { min-height: 44px; font-size: 12px; white-space: nowrap; }
+  .detail { padding-left: 16px; padding-right: 16px; }
+  .gallery { height: min(122vw, 430px); }
+  .purchase { flex-direction: column; align-items: stretch; }
+  .quantity { justify-content: center; }
+  .purchase .btn { min-height: 52px; }
+}
+
+@media (max-width: 767px) {
+  .announcement { overflow-wrap: anywhere; }
+  .hero h1, .page-title h1 { font-size: clamp(38px, 11vw, 49px); }
+  .head h2 { font-size: clamp(29px, 8.5vw, 37px); }
+  .product-card, .card { min-width: 0; }
+  .product-info button, .card-bottom button { word-break: normal; overflow-wrap: normal; }
+}

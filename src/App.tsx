@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import "./App.css";
 import "./readability.css";
+import "./mobile.css";
 import { supabase } from "./lib/supabase";
 import { createOrder, fetchProducts, getAdminMetrics, getProfile } from "./lib/store";
 import {
