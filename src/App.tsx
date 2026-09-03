@@ -220,13 +220,16 @@ export default function App() {
         search={() => setSearch(!search)}
       />
       {menu && (
-        <div className="mobile-menu">
-          {["Shop all", "Complexion", "Lips", "Eyes", "Skincare", "Our story", "Beauty guide", ...(isAdmin ? ["Studio"] : [])].map((x) => (
+        <>
+        <button className="mobile-menu-scrim" aria-label="Close navigation menu" onClick={() => setMenu(false)} />
+        <div className="mobile-menu" role="dialog" aria-label="Mobile navigation">
+          {["Shop all", "Complexion", "Lips", "Eyes", "Skincare", "Our story", "Beauty guide", "Account", ...(isAdmin ? ["Studio"] : [])].map((x) => (
             <button
               key={x}
               className={
                 (x === "Our story" && page === "story") ||
                 (x === "Beauty guide" && page === "guide") ||
+                (x === "Account" && page === "account") ||
                 (x !== "Our story" && x !== "Studio" && (page === "shop" || page === "product")) ||
                 (x === "Studio" && page === "admin")
                   ? "active"
@@ -237,6 +240,10 @@ export default function App() {
                   go("admin");
                   return;
                 }
+                if (x === "Account") {
+                  go("account");
+                  return;
+                }
                 setCategory(x === "Shop all" || x === "Our story" || x === "Beauty guide" ? "All" : x);
                 go(x === "Our story" ? "story" : x === "Beauty guide" ? "guide" : "shop");
               }}
@@ -245,6 +252,7 @@ export default function App() {
             </button>
           ))}
         </div>
+        </>
       )}
       {search && (
         <div className="search-bar">
