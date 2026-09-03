@@ -27,6 +27,7 @@ import { createOrder, fetchProducts, getAdminMetrics, getProfile } from "./lib/s
 import {
   archiveProduct,
   archiveOrders,
+  cancelUnpaidOrder,
   confirmManualPayment,
   deleteAdminProduct,
   deleteOrders,
@@ -84,6 +85,18 @@ const categories = [
   ],
 ];
 const money = (n: number) => `$${n.toFixed(2)}`;
+const orderMoney = (cents: number, currency = "CAD") =>
+  new Intl.NumberFormat("en-CA", { style: "currency", currency, currencyDisplay: "code" }).format(cents / 100);
+const checkoutCountries = [
+  "Canada", "United States", "United Kingdom", "Nigeria", "Australia", "Brazil", "China",
+  "France", "Germany", "India", "Ireland", "Italy", "Japan", "Mexico", "Netherlands",
+  "New Zealand", "Singapore", "South Africa", "South Korea", "United Arab Emirates",
+];
+const canadianProvinces = [
+  "Alberta", "British Columbia", "Manitoba", "New Brunswick", "Newfoundland and Labrador",
+  "Northwest Territories", "Nova Scotia", "Nunavut", "Ontario", "Prince Edward Island",
+  "Quebec", "Saskatchewan", "Yukon",
+];
 
 export default function App() {
   const [page, setPage] = useState<
@@ -934,7 +947,7 @@ function Cart({ open, close, cart, subtotal, update, remove, checkout }: any) {
                 <span>Subtotal</span>
                 <b>{money(subtotal)}</b>
               </div>
-              <small>Shipping and taxes calculated at checkout.</small>
+              <small>Shipping is confirmed at checkout.</small>
               <button className="btn dark" onClick={checkout}>
                 Secure checkout <ArrowRight size={17} />
               </button>
@@ -966,6 +979,12 @@ function Checkout({ cart, subtotal, back }: any) {
     [confirmation, setConfirmation] = useState<any>(null),
     [error, setError] = useState("");
   const orderSubmissionStarted = useRef(false);
+  const checkoutIdempotencyKey = useRef(
+    sessionStorage.getItem("blg-checkout-idempotency-key") ?? crypto.randomUUID(),
+  );
+  useEffect(() => {
+    sessionStorage.setItem("blg-checkout-idempotency-key", checkoutIdempotencyKey.current);
+  }, []);
   useEffect(() => {
     void getPublicPaymentSettings()
       .then(setSettings)
@@ -976,19 +995,28 @@ function Checkout({ cart, subtotal, back }: any) {
       .then(({ profile, address: savedAddress }) => {
         if (!savedAddress) return;
         setAddress((current) => ({
-          ...savedAddress,
-          email: profile?.email ?? current.email ?? "",
-          phone: savedAddress.phone ?? profile?.phone ?? current.phone ?? "",
-          country: savedAddress.country ?? "Canada",
           ...current,
+          ...savedAddress,
+          email: current.email ?? profile?.email ?? "",
+          phone: current.phone ?? savedAddress.phone ?? profile?.phone ?? "",
+          country: savedAddress.country ?? "Canada",
         }));
       })
       .catch(() => undefined);
   }, []);
-  const shipping =
-    subtotal >= (settings?.free_shipping_threshold_cents ?? 7500) / 100
+  const isCanada = (address.country ?? "Canada").trim().toLowerCase() === "canada";
+  const standardShippingCents = isCanada
+    ? settings?.standard_shipping_cents
+    : settings?.international_standard_shipping_cents;
+  const freeShippingThresholdCents = isCanada
+    ? settings?.free_shipping_threshold_cents
+    : settings?.international_free_shipping_threshold_cents;
+  const shippingConfigured = Number.isFinite(standardShippingCents);
+  const shipping = shippingConfigured
+    ? Number.isFinite(freeShippingThresholdCents) && subtotal * 100 >= freeShippingThresholdCents
       ? 0
-      : (settings?.standard_shipping_cents ?? 800) / 100;
+      : standardShippingCents / 100
+    : null;
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (step === 1) {
@@ -999,8 +1027,7 @@ function Checkout({ cart, subtotal, back }: any) {
         ["phone", "phone number"],
         ["address", "street address"],
         ["city", "city"],
-        ["province", "province"],
-        ["postal_code", "postal code"],
+        ["province", isCanada ? "province or territory" : "state, province, or region"],
         ["country", "country"],
       ] as const;
       const missingField = requiredFields.find(([field]) => !address[field]?.trim());
@@ -1012,9 +1039,18 @@ function Checkout({ cart, subtotal, back }: any) {
         setError("Enter a valid email address.");
         return;
       }
+      const phoneDigits = address.phone.replace(/\D/g, "");
+      if (!/^\+?[\d\s().-]+$/.test(address.phone.trim()) || phoneDigits.length < 7 || phoneDigits.length > 15) {
+        setError("Enter a valid phone number, including the country code for international numbers.");
+        return;
+      }
       const postal = (address.postal_code ?? "").toUpperCase().replace(/\s/g, "");
-      if (!/^[ABCEGHJKLMNPRSTVXY]\d[A-Z]\d[A-Z]\d$/.test(postal)) {
+      if (isCanada && !/^[ABCEGHJKLMNPRSTVXY]\d[A-Z]\d[A-Z]\d$/.test(postal)) {
         setError("Enter a valid Canadian postal code.");
+        return;
+      }
+      if (!isCanada && !shippingConfigured) {
+        setError("Shipping is not configured for this international destination. Please contact Bali & Lisa Glam before ordering.");
         return;
       }
       setError("");
@@ -1034,12 +1070,14 @@ function Checkout({ cart, subtotal, back }: any) {
         cart.map((x: CartLine) => ({ product_id: x.id, quantity: x.quantity, shade: x.shade })),
         address,
         method,
+        checkoutIdempotencyKey.current,
       );
       orderCreated = true;
       const orderSummary = await getManualOrderSummary(order.order_id);
       setConfirmation({ ...order, method });
+      sessionStorage.removeItem("blg-checkout-idempotency-key");
       window.dispatchEvent(new Event("blg:checkout-complete"));
-      const formatCad = (cents: number) => `CA$${(cents / 100).toFixed(2)}`;
+      const formatOrderTotal = (cents: number) => orderMoney(cents, orderSummary.currency);
       const orderLines = orderSummary.order_items
         .map((item, index) => {
           const lineTotal = item.unit_price_cents * item.quantity;
@@ -1047,8 +1085,8 @@ function Checkout({ cart, subtotal, back }: any) {
             `${index + 1}. ${item.product_name}`,
             item.shade ? `   Color/Variant: ${item.shade}` : null,
             `   Quantity: ${item.quantity}`,
-            `   Price: ${formatCad(item.unit_price_cents)}`,
-            `   Subtotal: ${formatCad(lineTotal)}`,
+            `   Price: ${formatOrderTotal(item.unit_price_cents)}`,
+            `   Subtotal: ${formatOrderTotal(lineTotal)}`,
           ]
             .filter(Boolean)
             .join("\n");
@@ -1066,13 +1104,15 @@ ORDER DETAILS
 
 ${orderLines}
 
-Shipping: ${formatCad(orderSummary.shipping_cents)}
-Order Total: ${formatCad(orderSummary.total_cents)}
+Shipping: ${formatOrderTotal(orderSummary.shipping_cents)}
+Order Total: ${formatOrderTotal(orderSummary.total_cents)}
 
 DELIVERY
+${address.address}${address.unit ? `, ${address.unit}` : ""}
 ${address.city}, ${address.province}
-${address.postal_code.toUpperCase()}
+${address.postal_code?.toUpperCase() || "No postal / ZIP code"}
 ${address.country}
+Phone: ${address.phone}
 
 Payment Method: ${method === "manual_whatsapp" ? "WhatsApp Manual Payment" : "Email Manual Payment"}
 
@@ -1111,9 +1151,8 @@ Thank you.`;
             Order #{confirmation.order_number} is pending payment verification. Contact Bali & Lisa
             Glam using your selected method and send your receipt privately.
           </p>
-          <p>
-            <b>Total: CA${(confirmation.total_cents / 100).toFixed(2)}</b>
-          </p>
+          <p><b>Total: {orderMoney(confirmation.total_cents, confirmation.currency)}</b></p>
+          <p>Payment is requested before {new Date(confirmation.payment_expires_at).toLocaleString("en-CA")}.</p>
           <button className="btn dark" onClick={back}>
             Continue shopping
           </button>
@@ -1204,32 +1243,26 @@ Thank you.`;
                   />
                 </label>
                 <label>
-                  Province
-                  <input
-                    required
-                    value={address.province ?? ""}
-                    onChange={(e) => setAddress({ ...address, province: e.target.value })}
-                  />
+                  {isCanada ? "Province / territory" : "State / province / region"}
+                  {isCanada ? <select required value={address.province ?? ""} onChange={(e) => setAddress({ ...address, province: e.target.value })}><option value="">Select province or territory</option>{canadianProvinces.map((province) => <option key={province} value={province}>{province}</option>)}</select> : <input required value={address.province ?? ""} onChange={(e) => setAddress({ ...address, province: e.target.value })} />}
                 </label>
               </div>
               <div className="form-row">
                 <label>
-                  Postal code
+                  {isCanada ? "Postal code" : "Postal / ZIP code (if applicable)"}
                   <input
-                    required
+                    required={isCanada}
                     value={address.postal_code ?? ""}
                     onChange={(e) => setAddress({ ...address, postal_code: e.target.value })}
                   />
                 </label>
                 <label>
                   Country
-                  <input
-                    required
-                    value={address.country ?? "Canada"}
-                    onChange={(e) => setAddress({ ...address, country: e.target.value })}
-                  />
+                  <select required value={checkoutCountries.includes(address.country ?? "Canada") ? address.country ?? "Canada" : "__other__"} onChange={(e) => setAddress({ ...address, country: e.target.value === "__other__" ? "" : e.target.value, province: "", postal_code: "" })}>{checkoutCountries.map((country) => <option key={country} value={country}>{country}</option>)}<option value="__other__">Other country</option></select>
                 </label>
               </div>
+              {!checkoutCountries.includes(address.country ?? "Canada") && <label>Country name<input required value={address.country ?? ""} onChange={(e) => setAddress({ ...address, country: e.target.value })} placeholder="Enter destination country" /></label>}
+              {!isCanada && <p>All prices and order totals are in CAD. Destination-country duties, taxes, or import fees may be charged separately and are the customer’s responsibility.</p>}
             </>
           ) : (
             <>
@@ -1284,9 +1317,9 @@ Thank you.`;
             <span>Subtotal</span>
             <b>CA{money(subtotal)}</b>
             <span>Shipping</span>
-            <b>{shipping ? "CA" + money(shipping) : "Free"}</b>
+            <b>{shipping === null ? "Contact us" : shipping ? "CA" + money(shipping) : "Free"}</b>
             <strong>
-              Total <em>CA{money(subtotal + shipping)}</em>
+              Total <em>{shipping === null ? "Pending shipping configuration" : `CA${money(subtotal + shipping)}`}</em>
             </strong>
           </div>
         </aside>
@@ -1402,15 +1435,16 @@ function CustomerDashboard({ setUser, note, add, goShop }: any) {
     finally { setBusy(false); }
   };
   const saveAddress = () => {
+    const addressIsCanada = (address.country ?? "Canada").trim().toLowerCase() === "canada";
     const postal = (address.postal_code ?? "").toUpperCase().replace(/\s/g, "");
-    if (!/^[ABCEGHJKLMNPRSTVXY]\d[A-Z]\d[A-Z]\d$/.test(postal)) { note("Enter a valid Canadian postal code."); return; }
-    void save(() => saveCustomerAddress({ ...address, postal_code: `${postal.slice(0, 3)} ${postal.slice(3)}` }), "Default delivery address saved.");
+    if (addressIsCanada && !/^[ABCEGHJKLMNPRSTVXY]\d[A-Z]\d[A-Z]\d$/.test(postal)) { note("Enter a valid Canadian postal code."); return; }
+    void save(() => saveCustomerAddress({ ...address, postal_code: addressIsCanada ? `${postal.slice(0, 3)} ${postal.slice(3)}` : (address.postal_code ?? "").trim() }), "Default delivery address saved.");
   };
   return <section className="customer-account"><header><p className="eyebrow">MY ACCOUNT</p><h1>Welcome back, {profile.first_name || data.user.email.split("@")[0]}.</h1></header><nav>{["Overview", "My Orders", "Profile", "Addresses", "Wishlist", "Security"].map((x) => <button className={tab === x ? "active" : ""} onClick={() => setTab(x)} key={x}>{x}</button>)}<button onClick={async () => { await supabase.auth.signOut(); setUser(null); }}>Sign out</button></nav><main>
     {tab === "Overview" && <div className="account-summary"><article><b>{orders.length}</b><span>Orders</span></article><article><b>{orders.filter((o: any) => o.payment_status === "awaiting_payment").length}</b><span>Awaiting payment</span></article><article><b>{orders.filter((o: any) => o.payment_status === "paid").length}</b><span>Paid orders</span></article><article><b>{wish.length}</b><span>Saved items</span></article></div>}
     {tab === "My Orders" && <CustomerOrders orders={orders} refresh={load} />}
     {tab === "Profile" && <form className="account-form" onSubmit={(event) => { event.preventDefault(); void save(() => saveCustomerProfile(profile), "Profile saved."); }}><label>First name<input value={profile.first_name ?? ""} onChange={(event) => updateProfile("first_name", event.target.value)} /></label><label>Last name<input value={profile.last_name ?? ""} onChange={(event) => updateProfile("last_name", event.target.value)} /></label><label>Email<input disabled value={profile.email ?? ""} /></label><label>Phone<input value={profile.phone ?? ""} onChange={(event) => updateProfile("phone", event.target.value)} /></label><button className="btn dark" disabled={busy}>Save changes</button></form>}
-    {tab === "Addresses" && <form className="account-form" onSubmit={(event) => { event.preventDefault(); saveAddress(); }}>{["first_name", "last_name", "address", "unit", "city", "province", "postal_code", "country", "phone"].map((key) => <label key={key}>{key.replace("_", " ")}<input required={key !== "unit"} value={address[key] ?? (key === "country" ? "Canada" : "")} onChange={(event) => updateAddress(key, event.target.value)} /></label>)}<button className="btn dark" disabled={busy}>Save address</button></form>}
+    {tab === "Addresses" && <form className="account-form" onSubmit={(event) => { event.preventDefault(); saveAddress(); }}>{["first_name", "last_name", "address", "unit", "city", "province", "postal_code", "country", "phone"].map((key) => <label key={key}>{key.replace("_", " ")}<input required={key !== "unit" && (key !== "postal_code" || (address.country ?? "Canada").trim().toLowerCase() === "canada")} value={address[key] ?? (key === "country" ? "Canada" : "")} onChange={(event) => updateAddress(key, event.target.value)} /></label>)}<button className="btn dark" disabled={busy}>Save address</button></form>}
     {tab === "Wishlist" && <div className="wishlist-grid">{wish.length ? wish.map((row: any) => { const p = row.products; const available = p?.is_active && p?.inventory_quantity > 0; return p && <article key={p.id}><img src={p.image_url} alt={p.name} /><b>{p.name}</b><span>{money(p.price_cents / 100)}</span><small>{available ? "Available" : "Currently unavailable"}</small>{available && <button className="btn dark" onClick={() => add({ id: p.id, name: p.name, category: "Saved item", price: p.price_cents / 100, rating: 0, reviews: 0, image: p.image_url, description: "", shades: ["Universal"], inventory: p.inventory_quantity })}>Add to bag</button>}<button onClick={() => void save(() => toggleWishlist(p.id, true), "Removed from wishlist.")}>Remove</button></article>; }) : <p>Your wishlist is waiting for something beautiful. <button className="text" onClick={goShop}>Explore products</button></p>}</div>}
     {tab === "Security" && <div className="account-form"><p>Use a secure password to protect your account.</p><form onSubmit={(event) => { event.preventDefault(); if (newPassword.length < 6) { note("Use a password with at least 6 characters."); return; } if (newPassword !== confirmNewPassword) { note("Passwords do not match."); return; } void save(async () => { const { error } = await supabase.auth.updateUser({ password: newPassword }); if (error) throw error; setNewPassword(""); setConfirmNewPassword(""); }, "Your password has been updated."); }}><label>New password<input required minLength={6} type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></label><label>Confirm new password<input required minLength={6} type="password" value={confirmNewPassword} onChange={(event) => setConfirmNewPassword(event.target.value)} /></label><button className="btn dark" disabled={busy}>Update password</button></form><button className="text" onClick={async () => { const { error } = await supabase.auth.resetPasswordForEmail(profile.email, { redirectTo: getAuthRedirectUrl() }); note(error ? "We could not send your password-reset link." : "Check your email for a password-reset link."); }}>Send a password-reset link instead</button></div>}
   </main></section>;
@@ -1419,7 +1453,7 @@ function CustomerOrders({ orders, refresh }: any) {
   const [filter, setFilter] = useState("all");
   const [detail, setDetail] = useState<string | null>(null);
   const list = orders.filter((order: any) => filter === "all" || order.payment_status === filter || order.status === filter);
-  return <section className="customer-orders"><button className="text" onClick={() => void refresh()}>Refresh status</button><select aria-label="Filter orders" value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">All Orders</option><option value="awaiting_payment">Awaiting Payment</option><option value="paid">Paid</option><option value="fulfilled">Fulfilled</option></select>{list.length ? list.map((order: any) => { const delivery = order.shipping_address ?? {}; return <article key={order.id}><button className="order-open" onClick={() => setDetail(detail === order.id ? null : order.id)}><b>Order #{order.order_number}</b><span>{new Date(order.created_at).toLocaleDateString("en-CA")} · {money(order.total_cents / 100)}</span><span>Payment: {paymentStatusLabel(order.payment_status)} · {orderStatusLabel(order.status)}</span></button>{detail === order.id && <div className="customer-order-detail"><p>{order.payment_status === "paid" ? "Payment successful — your payment has been confirmed." : "Payment awaiting confirmation. If you have sent your receipt, no further action is required unless we contact you."}</p><p><b>Delivery</b><br />{[delivery.address, delivery.unit, delivery.city, delivery.province, delivery.postal_code, delivery.country].filter(Boolean).join(", ") || "Delivery details are on file."}</p>{order.order_items.map((item: any, index: number) => <div key={`${item.product_name}-${index}`}><b>{item.product_name}</b><span>{item.shade ? `${item.shade} · ` : ""}Qty {item.quantity} · {money(item.unit_price_cents / 100)} each · {money(item.unit_price_cents * item.quantity / 100)}</span></div>)}<p>Merchandise: {money(order.subtotal_cents / 100)} · Shipping: {money(order.shipping_cents / 100)} · Total: {money(order.total_cents / 100)}</p></div>}</article>; }) : <p>You haven’t placed any orders yet.</p>}</section>;
+  return <section className="customer-orders"><button className="text" onClick={() => void refresh()}>Refresh status</button><select aria-label="Filter orders" value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">All Orders</option><option value="awaiting_payment">Awaiting Payment</option><option value="paid">Paid</option><option value="fulfilled">Fulfilled</option></select>{list.length ? list.map((order: any) => { const delivery = order.shipping_address ?? {}; const currency = order.currency ?? "CAD"; return <article key={order.id}><button className="order-open" onClick={() => setDetail(detail === order.id ? null : order.id)}><b>Order #{order.order_number}</b><span>{new Date(order.created_at).toLocaleDateString("en-CA")} · {orderMoney(order.total_cents, currency)}</span><span>Payment: {paymentStatusLabel(order.payment_status)} · {orderStatusLabel(order.status)}</span></button>{detail === order.id && <div className="customer-order-detail"><p>{order.payment_status === "paid" ? "Payment successful — your payment has been confirmed." : order.payment_status === "cancelled" ? "This unpaid order was cancelled and its reserved inventory was released." : "Payment awaiting confirmation. If you have sent your receipt, no further action is required unless we contact you."}</p>{order.payment_status === "awaiting_payment" && order.payment_expires_at && <p>Payment requested before {new Date(order.payment_expires_at).toLocaleString("en-CA")}.</p>}<p><b>Delivery</b><br />{[delivery.address, delivery.unit, delivery.city, delivery.province, delivery.postal_code, delivery.country].filter(Boolean).join(", ") || "Delivery details are on file."}</p>{order.order_items.map((item: any, index: number) => <div key={`${item.product_name}-${index}`}><b>{item.product_name}</b><span>{item.shade ? `${item.shade} · ` : ""}Qty {item.quantity} · {orderMoney(item.unit_price_cents, currency)} each · {orderMoney(item.unit_price_cents * item.quantity, currency)}</span></div>)}<p>Merchandise: {orderMoney(order.subtotal_cents, currency)} · Shipping: {orderMoney(order.shipping_cents, currency)} · Total: {orderMoney(order.total_cents, currency)}</p></div>}</article>; }) : <p>You haven’t placed any orders yet.</p>}</section>;
 }
 function AdminGuard({ user, go, note }: any) {
   const [isAdmin, setIsAdmin] = useState(false);
@@ -1914,6 +1948,9 @@ function AdminOrders({ orders, refresh, note }: any) {
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const selectedIncludesReservedOrder = orders.some((order: any) =>
+    selected.includes(order.id) && order.inventory_reservation_status === "reserved"
+  );
   const visibleOrders = useMemo(() => orders
     .filter((order: any) => view === "archived" ? Boolean(order.archived_at) : !order.archived_at)
     .filter((order: any) => {
@@ -1926,6 +1963,10 @@ function AdminOrders({ orders, refresh, note }: any) {
     .sort((a: any, b: any) => sort === "oldest" ? +new Date(a.created_at) - +new Date(b.created_at) : sort === "highest" ? b.total_cents - a.total_cents : sort === "lowest" ? a.total_cents - b.total_cents : +new Date(b.created_at) - +new Date(a.created_at)), [orders, view, search, paymentFilter, statusFilter, methodFilter, sort]);
   const runBulk = async (action: "archive" | "delete") => {
     if (!selected.length) return;
+    if (action === "delete" && selectedIncludesReservedOrder) {
+      note("Cancel selected unpaid reservations and restore stock before deleting them.");
+      return;
+    }
     const confirmed = action === "delete"
       ? confirm(`Permanently delete ${selected.length} selected order${selected.length === 1 ? "" : "s"}? This cannot be undone.`)
       : confirm(`Archive ${selected.length} selected order${selected.length === 1 ? "" : "s"}?`);
@@ -1947,19 +1988,20 @@ function AdminOrders({ orders, refresh, note }: any) {
       <select value={methodFilter} onChange={(event) => setMethodFilter(event.target.value)}><option value="all">All payment methods</option><option value="manual_whatsapp">WhatsApp</option><option value="manual_email">Email</option></select>
       <select value={sort} onChange={(event) => setSort(event.target.value)}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="highest">Highest total</option><option value="lowest">Lowest total</option></select>
     </div>
-    {selected.length > 0 && <div className="order-bulk-actions"><b>{selected.length} selected</b>{view === "active" && <button disabled={busy} onClick={() => void runBulk("archive")}>Archive selected</button>}<button className="delete-product" disabled={busy} onClick={() => void runBulk("delete")}>Delete selected permanently</button></div>}
+    {selected.length > 0 && <div className="order-bulk-actions"><b>{selected.length} selected</b>{view === "active" && <button disabled={busy} onClick={() => void runBulk("archive")}>Archive selected</button>}<button className="delete-product" disabled={busy || selectedIncludesReservedOrder} title={selectedIncludesReservedOrder ? "Cancel unpaid reservations and restore stock before deleting them." : undefined} onClick={() => void runBulk("delete")}>Delete selected permanently</button></div>}
     {visibleOrders.length ? visibleOrders.map((o: any) => {
       const customerName = [o.profiles?.first_name, o.profiles?.last_name].filter(Boolean).join(" ") || "Customer";
       const address = o.shipping_address ?? {};
       return <article className="order-card" key={o.id}>
         <header className="order-card-header"><label className="order-select"><input type="checkbox" checked={selected.includes(o.id)} onChange={() => toggleSelected(o.id)} /><span className="sr-only">Select order #{o.order_number}</span></label><div><p>Order reference</p><h2>#{o.order_number ?? o.id.slice(0, 8)}</h2></div><span className={`status-badge payment-${o.payment_status ?? "awaiting_payment"}`}>Payment: {paymentStatusLabel(o.payment_status)}</span></header>
-        <div className="order-meta"><div><span>Customer</span><b>{customerName}</b><small>{o.profiles?.email ?? "No email available"}</small></div><div><span>Date</span><b>{new Date(o.created_at).toLocaleString("en-CA")}</b></div><div><span>Total</span><b>{money(o.total_cents / 100)}</b></div><div><span>Payment method</span><b>{paymentMethodLabel(o.payment_method)}</b></div></div>
-        <div className="order-products"><h3>Products</h3><ul>{o.order_items?.map((item: any) => <li key={`${o.id}-${item.product_name}-${item.shade ?? "standard"}`}><b>{item.product_name}</b>{item.shade && <span>Color/Variant: {item.shade}</span>}<span>Quantity: {item.quantity} · {money(item.unit_price_cents / 100)} each · Subtotal: {money((item.unit_price_cents * item.quantity) / 100)}</span></li>)}</ul></div>
-        {detailId === o.id && <div className="order-detail"><div><span>Delivery</span><b>{[address.address, address.unit, `${address.city ?? ""}${address.province ? `, ${address.province}` : ""}`, address.postal_code, address.country].filter(Boolean).join(" · ")}</b><small>{address.phone ? `Phone: ${address.phone}` : ""}</small></div><div><span>Payment</span><b>{paymentMethodLabel(o.payment_method)} · {paymentStatusLabel(o.payment_status)}</b><small>{o.paid_at ? `Paid: ${new Date(o.paid_at).toLocaleString("en-CA")}` : "Not yet paid"}</small></div><div><span>Totals</span><b>Shipping {money(o.shipping_cents / 100)} · Total {money(o.total_cents / 100)}</b><small>Order status: {orderStatusLabel(o.status)}</small></div></div>}
-        <div className="order-actions"><button className="product-table-action" onClick={() => setDetailId(detailId === o.id ? null : o.id)}>{detailId === o.id ? "Hide details" : "View details"}</button><div><span>Order status</span><label className="status-select"><span className="sr-only">Order status</span><select value={o.status} onChange={async (event) => { try { await updateOrderStatus(o.id, event.target.value as any); await refresh(); note("Order status updated."); } catch (error) { console.error("Order status update failed:", error); note("Order status could not be updated."); } }}>{["pending", "paid", "fulfilled", "cancelled", "refunded"].map((status) => <option key={status} value={status}>{orderStatusLabel(status)}</option>)}</select></label></div>
+        <div className="order-meta"><div><span>Customer</span><b>{customerName}</b><small>{o.profiles?.email ?? "No email available"}</small></div><div><span>Date</span><b>{new Date(o.created_at).toLocaleString("en-CA")}</b></div><div><span>Total</span><b>{orderMoney(o.total_cents, o.currency ?? "CAD")}</b></div><div><span>Payment method</span><b>{paymentMethodLabel(o.payment_method)}</b></div></div>
+        <div className="order-products"><h3>Products</h3><ul>{o.order_items?.map((item: any) => <li key={`${o.id}-${item.product_name}-${item.shade ?? "standard"}`}><b>{item.product_name}</b>{item.shade && <span>Color/Variant: {item.shade}</span>}<span>Quantity: {item.quantity} · {orderMoney(item.unit_price_cents, o.currency ?? "CAD")} each · Subtotal: {orderMoney(item.unit_price_cents * item.quantity, o.currency ?? "CAD")}</span></li>)}</ul></div>
+        {detailId === o.id && <div className="order-detail"><div><span>Delivery</span><b>{[address.address, address.unit, `${address.city ?? ""}${address.province ? `, ${address.province}` : ""}`, address.postal_code, address.country].filter(Boolean).join(" · ")}</b><small>{address.phone ? `Phone: ${address.phone}` : ""}</small></div><div><span>Payment</span><b>{paymentMethodLabel(o.payment_method)} · {paymentStatusLabel(o.payment_status)}</b><small>{o.paid_at ? `Paid: ${new Date(o.paid_at).toLocaleString("en-CA")}` : o.payment_expires_at ? `Payment requested before: ${new Date(o.payment_expires_at).toLocaleString("en-CA")}` : "Not yet paid"}</small></div><div><span>Inventory</span><b>{o.inventory_reservation_status === "reserved" ? "Reserved for this unpaid order" : o.inventory_reservation_status === "restored" ? "Restored to stock" : o.inventory_reservation_status === "committed" ? "Committed to paid order" : "Legacy order — not tracked"}</b><small>{o.inventory_restored_at ? `Restored: ${new Date(o.inventory_restored_at).toLocaleString("en-CA")}` : o.cancellation_reason ?? ""}</small></div><div><span>Totals</span><b>Shipping {orderMoney(o.shipping_cents, o.currency ?? "CAD")} · Total {orderMoney(o.total_cents, o.currency ?? "CAD")}</b><small>Order status: {orderStatusLabel(o.status)}</small></div></div>}
+        <div className="order-actions"><button className="product-table-action" onClick={() => setDetailId(detailId === o.id ? null : o.id)}>{detailId === o.id ? "Hide details" : "View details"}</button><div><span>Order status</span><label className="status-select"><span className="sr-only">Order status</span><select disabled={o.inventory_reservation_status === "reserved"} title={o.inventory_reservation_status === "reserved" ? "Confirm payment or cancel and restore stock first." : undefined} value={o.status} onChange={async (event) => { try { await updateOrderStatus(o.id, event.target.value as any); await refresh(); note("Order status updated."); } catch (error) { console.error("Order status update failed:", error); note("Order status could not be updated."); } }}>{["pending", "paid", "fulfilled", "cancelled", "refunded"].map((status) => <option key={status} value={status}>{orderStatusLabel(status)}</option>)}</select></label></div>
           {o.payment_status === "awaiting_payment" && <button type="button" className="btn dark order-payment-action" onClick={async () => { if (confirm(`Confirm that you independently verified payment for Order #${o.order_number}?`)) { try { await confirmManualPayment(o.id); await refresh(); note("Payment marked as paid."); } catch (error) { console.error("Payment confirmation failed:", error); note("Payment could not be confirmed."); } } }}>Mark as Paid</button>}
+          {o.payment_status === "awaiting_payment" && o.inventory_reservation_status === "reserved" && <button type="button" className="delete-product product-table-action" onClick={async () => { if (confirm(`Cancel Order #${o.order_number} and restore its reserved inventory?`)) { try { await cancelUnpaidOrder(o.id); await refresh(); note("Unpaid order cancelled and inventory restored."); } catch (error) { console.error("Unpaid order cancellation failed:", error); note("The order could not be cancelled."); } } }}>Cancel & restore stock</button>}
           {view === "active" ? <button className="product-table-action" onClick={async () => { try { await archiveOrders([o.id]); await refresh(); note("Order archived."); } catch (error) { console.error("Order archive failed:", error); note("Order could not be archived."); } }}>Archive order</button> : <button className="product-table-action restore-product" onClick={async () => { try { await restoreOrder(o.id); await refresh(); note("Order restored."); } catch (error) { console.error("Order restore failed:", error); note("Order could not be restored."); } }}>Restore order</button>}
-          <button className="delete-product product-table-action" onClick={async () => { if (confirm(`Permanently delete Order #${o.order_number}? This cannot be undone.`)) { try { await deleteOrders([o.id]); await refresh(); note("Order permanently deleted."); } catch (error) { console.error("Order deletion failed:", error); note("Order could not be deleted."); } } }}>Delete order permanently</button></div>
+          <button className="delete-product product-table-action" disabled={o.inventory_reservation_status === "reserved"} title={o.inventory_reservation_status === "reserved" ? "Cancel this unpaid order and restore stock before deleting it." : undefined} onClick={async () => { if (confirm(`Permanently delete Order #${o.order_number}? This cannot be undone.`)) { try { await deleteOrders([o.id]); await refresh(); note("Order permanently deleted."); } catch (error) { console.error("Order deletion failed:", error); note("Order could not be deleted. Cancel unpaid reservations before deletion."); } } }}>Delete order permanently</button></div>
       </article>;
     }) : <p>No {view} orders match these filters.</p>}
   </section>;
@@ -2003,18 +2045,24 @@ function AdminSettings({ settings, setSettings, save }: any) {
         ["business_name", "Business name"],
         ["business_email", "Business email"],
         ["whatsapp_number", "WhatsApp number"],
-        ["free_shipping_threshold_cents", "Free shipping threshold (cents)"],
-        ["standard_shipping_cents", "Standard shipping (cents)"],
+        ["free_shipping_threshold_cents", "Canada free-shipping threshold (cents)"],
+        ["standard_shipping_cents", "Canada standard shipping (cents)"],
+        ["international_standard_shipping_cents", "International standard shipping (cents; blank disables international checkout)"],
+        ["international_free_shipping_threshold_cents", "International free-shipping threshold (cents; blank disables free shipping)"],
         ["bank_transfer_instructions", "Bank transfer instructions"],
       ].map(([key, label]) => (
         <label key={key}>
           {label}
           <input
+            type={key.includes("cents") ? "number" : "text"}
+            min={key.includes("cents") ? 0 : undefined}
             value={settings[key] ?? ""}
             onChange={(e) =>
               setSettings({
                 ...settings,
-                [key]: key.includes("cents") ? Number(e.target.value) : e.target.value,
+                [key]: key.startsWith("international_") && e.target.value === ""
+                  ? null
+                  : key.includes("cents") ? Number(e.target.value) : e.target.value,
               })
             }
           />

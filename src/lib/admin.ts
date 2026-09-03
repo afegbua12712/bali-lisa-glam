@@ -71,7 +71,7 @@ export async function uploadProductImage(file: File) {
 }
 
 export async function fetchAdminOrders() {
-  const { data, error } = await supabase.from('orders').select('id,order_number,status,payment_method,payment_status,paid_at,archived_at,total_cents,subtotal_cents,shipping_cents,shipping_address,created_at,profiles(email,first_name,last_name),order_items(product_name,shade,quantity,unit_price_cents)').order('created_at', { ascending: false })
+  const { data, error } = await supabase.from('orders').select('id,order_number,status,payment_method,payment_status,paid_at,payment_expires_at,inventory_reservation_status,inventory_restored_at,cancellation_reason,archived_at,currency,total_cents,subtotal_cents,shipping_cents,shipping_address,created_at,profiles(email,first_name,last_name),order_items(product_name,shade,quantity,unit_price_cents)').order('created_at', { ascending: false })
   if (error) throw error
   return data ?? []
 }
@@ -98,6 +98,11 @@ export async function updateOrderStatus(id: string, status: 'pending'|'paid'|'fu
 
 export async function confirmManualPayment(id: string) {
   const { error } = await supabase.rpc('confirm_manual_payment', { target_order_id: id })
+  if (error) throw error
+}
+
+export async function cancelUnpaidOrder(id: string, reason = 'Cancelled by administrator') {
+  const { error } = await supabase.rpc('cancel_unpaid_order', { target_order_id: id, reason })
   if (error) throw error
 }
 

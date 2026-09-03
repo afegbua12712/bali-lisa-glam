@@ -5,7 +5,7 @@ export async function getCustomerAccount() {
   if (!user) throw new Error('Sign in required')
   const [{ data: profile, error: profileError }, { data: orders, error: orderError }, { data: address, error: addressError }, { data: wishlist, error: wishlistError }] = await Promise.all([
     supabase.from('profiles').select('first_name,last_name,email,phone,role').eq('id', user.id).single(),
-    supabase.from('orders').select('id,order_number,status,payment_method,payment_status,paid_at,total_cents,subtotal_cents,shipping_cents,shipping_address,created_at,order_items(product_name,shade,quantity,unit_price_cents,products(image_url))').order('created_at', { ascending: false }),
+    supabase.from('orders').select('id,order_number,status,payment_method,payment_status,paid_at,payment_expires_at,inventory_reservation_status,inventory_restored_at,cancellation_reason,currency,total_cents,subtotal_cents,shipping_cents,shipping_address,created_at,order_items(product_name,shade,quantity,unit_price_cents,products(image_url))').order('created_at', { ascending: false }),
     supabase.from('customer_addresses').select('*').eq('customer_id', user.id).maybeSingle(),
     supabase.from('wishlists').select('product_id,products(id,name,price_cents,image_url,is_active,inventory_quantity)').order('created_at', { ascending: false }),
   ])

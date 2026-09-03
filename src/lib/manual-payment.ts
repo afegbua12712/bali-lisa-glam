@@ -2,10 +2,21 @@ import { supabase } from './supabase'
 
 export type ManualPaymentMethod = 'manual_whatsapp' | 'manual_email'
 
-export async function createManualOrder(lines: Array<{ product_id: number; quantity: number; shade: string }>, shippingAddress: Record<string, string>, method: ManualPaymentMethod) {
-  const { data, error } = await supabase.rpc('create_manual_order', { lines, shipping_address: shippingAddress, selected_payment_method: method })
+export type CreatedManualOrder = {
+  order_id: string
+  order_number: number
+  subtotal_cents: number
+  shipping_cents: number
+  total_cents: number
+  currency: string
+  payment_expires_at: string
+  already_existed: boolean
+}
+
+export async function createManualOrder(lines: Array<{ product_id: number; quantity: number; shade: string }>, shippingAddress: Record<string, string>, method: ManualPaymentMethod, idempotencyKey: string) {
+  const { data, error } = await supabase.rpc('create_manual_order', { lines, shipping_address: shippingAddress, selected_payment_method: method, idempotency_key: idempotencyKey })
   if (error) throw error
-  return (data as Array<{ order_id: string; order_number: number; total_cents: number }>)[0]
+  return (data as CreatedManualOrder[])[0]
 }
 
 export async function getManualOrderSummary(orderId: string) {
@@ -26,7 +37,7 @@ export async function getManualOrderSummary(orderId: string) {
 }
 
 export async function getPublicPaymentSettings() {
-  const { data, error } = await supabase.from('website_settings').select('business_email,whatsapp_number,free_shipping_threshold_cents,standard_shipping_cents,bank_transfer_instructions').eq('id', true).single()
+  const { data, error } = await supabase.from('website_settings').select('business_email,whatsapp_number,free_shipping_threshold_cents,standard_shipping_cents,international_standard_shipping_cents,international_free_shipping_threshold_cents,bank_transfer_instructions').eq('id', true).single()
   if (error) throw error
   return data
 }
