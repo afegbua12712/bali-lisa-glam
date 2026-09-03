@@ -50,6 +50,7 @@ import {
 } from "./lib/manual-payment";
 import { getCustomerAccount, saveCustomerAddress, saveCustomerProfile, toggleWishlist } from "./lib/customer";
 import { clearAuthCallbackUrl, friendlyAuthError, getAuthRedirectUrl, isAuthRateLimited } from "./lib/auth";
+import { sendOrderEmail } from "./lib/order-email";
 
 type Product = {
   id: number;
@@ -977,6 +978,7 @@ function Checkout({ cart, subtotal, back }: any) {
     [settings, setSettings] = useState<any>(null),
     [busy, setBusy] = useState(false),
     [confirmation, setConfirmation] = useState<any>(null),
+    [emailNotice, setEmailNotice] = useState(""),
     [error, setError] = useState("");
   const orderSubmissionStarted = useRef(false);
   const checkoutIdempotencyKey = useRef(
@@ -1075,6 +1077,9 @@ function Checkout({ cart, subtotal, back }: any) {
       orderCreated = true;
       const orderSummary = await getManualOrderSummary(order.order_id);
       setConfirmation({ ...order, method });
+      void sendOrderEmail(order.order_id, "order_created")
+        .then(() => setEmailNotice("We sent an order receipt to your email address."))
+        .catch(() => setEmailNotice("Your order is safely recorded, but we could not send the email receipt. You can continue with payment and contact us if you need a copy."));
       sessionStorage.removeItem("blg-checkout-idempotency-key");
       window.dispatchEvent(new Event("blg:checkout-complete"));
       const formatOrderTotal = (cents: number) => orderMoney(cents, orderSummary.currency);
@@ -1153,6 +1158,7 @@ Thank you.`;
           </p>
           <p><b>Total: {orderMoney(confirmation.total_cents, confirmation.currency)}</b></p>
           <p>Payment is requested before {new Date(confirmation.payment_expires_at).toLocaleString("en-CA")}.</p>
+          {emailNotice && <p role="status">{emailNotice}</p>}
           <button className="btn dark" onClick={back}>
             Continue shopping
           </button>
@@ -1992,13 +1998,21 @@ function AdminOrders({ orders, refresh, note }: any) {
     {visibleOrders.length ? visibleOrders.map((o: any) => {
       const customerName = [o.profiles?.first_name, o.profiles?.last_name].filter(Boolean).join(" ") || "Customer";
       const address = o.shipping_address ?? {};
+      const orderEmail = o.order_notifications?.find((item: any) => item.event_type === "order_created");
+      const paymentEmail = o.order_notifications?.find((item: any) => item.event_type === "payment_confirmed");
+      const retryEmail = async (eventType: "order_created" | "payment_confirmed") => {
+        try { await sendOrderEmail(o.id, eventType); await refresh(); note("Transactional email sent."); }
+        catch (emailError) { console.error("Transactional email retry failed:", emailError); await refresh(); note("The email could not be sent. The order itself is unchanged."); }
+      };
       return <article className="order-card" key={o.id}>
         <header className="order-card-header"><label className="order-select"><input type="checkbox" checked={selected.includes(o.id)} onChange={() => toggleSelected(o.id)} /><span className="sr-only">Select order #{o.order_number}</span></label><div><p>Order reference</p><h2>#{o.order_number ?? o.id.slice(0, 8)}</h2></div><span className={`status-badge payment-${o.payment_status ?? "awaiting_payment"}`}>Payment: {paymentStatusLabel(o.payment_status)}</span></header>
         <div className="order-meta"><div><span>Customer</span><b>{customerName}</b><small>{o.profiles?.email ?? "No email available"}</small></div><div><span>Date</span><b>{new Date(o.created_at).toLocaleString("en-CA")}</b></div><div><span>Total</span><b>{orderMoney(o.total_cents, o.currency ?? "CAD")}</b></div><div><span>Payment method</span><b>{paymentMethodLabel(o.payment_method)}</b></div></div>
         <div className="order-products"><h3>Products</h3><ul>{o.order_items?.map((item: any) => <li key={`${o.id}-${item.product_name}-${item.shade ?? "standard"}`}><b>{item.product_name}</b>{item.shade && <span>Color/Variant: {item.shade}</span>}<span>Quantity: {item.quantity} · {orderMoney(item.unit_price_cents, o.currency ?? "CAD")} each · Subtotal: {orderMoney(item.unit_price_cents * item.quantity, o.currency ?? "CAD")}</span></li>)}</ul></div>
-        {detailId === o.id && <div className="order-detail"><div><span>Delivery</span><b>{[address.address, address.unit, `${address.city ?? ""}${address.province ? `, ${address.province}` : ""}`, address.postal_code, address.country].filter(Boolean).join(" · ")}</b><small>{address.phone ? `Phone: ${address.phone}` : ""}</small></div><div><span>Payment</span><b>{paymentMethodLabel(o.payment_method)} · {paymentStatusLabel(o.payment_status)}</b><small>{o.paid_at ? `Paid: ${new Date(o.paid_at).toLocaleString("en-CA")}` : o.payment_expires_at ? `Payment requested before: ${new Date(o.payment_expires_at).toLocaleString("en-CA")}` : "Not yet paid"}</small></div><div><span>Inventory</span><b>{o.inventory_reservation_status === "reserved" ? "Reserved for this unpaid order" : o.inventory_reservation_status === "restored" ? "Restored to stock" : o.inventory_reservation_status === "committed" ? "Committed to paid order" : "Legacy order — not tracked"}</b><small>{o.inventory_restored_at ? `Restored: ${new Date(o.inventory_restored_at).toLocaleString("en-CA")}` : o.cancellation_reason ?? ""}</small></div><div><span>Totals</span><b>Shipping {orderMoney(o.shipping_cents, o.currency ?? "CAD")} · Total {orderMoney(o.total_cents, o.currency ?? "CAD")}</b><small>Order status: {orderStatusLabel(o.status)}</small></div></div>}
+        {detailId === o.id && <div className="order-detail"><div><span>Delivery</span><b>{[address.address, address.unit, `${address.city ?? ""}${address.province ? `, ${address.province}` : ""}`, address.postal_code, address.country].filter(Boolean).join(" · ")}</b><small>{address.phone ? `Phone: ${address.phone}` : ""}</small></div><div><span>Payment</span><b>{paymentMethodLabel(o.payment_method)} · {paymentStatusLabel(o.payment_status)}</b><small>{o.paid_at ? `Paid: ${new Date(o.paid_at).toLocaleString("en-CA")}` : o.payment_expires_at ? `Payment requested before: ${new Date(o.payment_expires_at).toLocaleString("en-CA")}` : "Not yet paid"}</small></div><div><span>Email notifications</span><b>Order email: {orderEmail?.status ?? "not sent"}</b><small>{o.payment_status === "paid" ? `Payment email: ${paymentEmail?.status ?? "not sent"}` : "Payment email is sent only after payment confirmation."}</small></div><div><span>Inventory</span><b>{o.inventory_reservation_status === "reserved" ? "Reserved for this unpaid order" : o.inventory_reservation_status === "restored" ? "Restored to stock" : o.inventory_reservation_status === "committed" ? "Committed to paid order" : "Legacy order — not tracked"}</b><small>{o.inventory_restored_at ? `Restored: ${new Date(o.inventory_restored_at).toLocaleString("en-CA")}` : o.cancellation_reason ?? ""}</small></div><div><span>Totals</span><b>Shipping {orderMoney(o.shipping_cents, o.currency ?? "CAD")} · Total {orderMoney(o.total_cents, o.currency ?? "CAD")}</b><small>Order status: {orderStatusLabel(o.status)}</small></div></div>}
         <div className="order-actions"><button className="product-table-action" onClick={() => setDetailId(detailId === o.id ? null : o.id)}>{detailId === o.id ? "Hide details" : "View details"}</button><div><span>Order status</span><label className="status-select"><span className="sr-only">Order status</span><select disabled={o.inventory_reservation_status === "reserved"} title={o.inventory_reservation_status === "reserved" ? "Confirm payment or cancel and restore stock first." : undefined} value={o.status} onChange={async (event) => { try { await updateOrderStatus(o.id, event.target.value as any); await refresh(); note("Order status updated."); } catch (error) { console.error("Order status update failed:", error); note("Order status could not be updated."); } }}>{["pending", "paid", "fulfilled", "cancelled", "refunded"].map((status) => <option key={status} value={status}>{orderStatusLabel(status)}</option>)}</select></label></div>
-          {o.payment_status === "awaiting_payment" && <button type="button" className="btn dark order-payment-action" onClick={async () => { if (confirm(`Confirm that you independently verified payment for Order #${o.order_number}?`)) { try { await confirmManualPayment(o.id); await refresh(); note("Payment marked as paid."); } catch (error) { console.error("Payment confirmation failed:", error); note("Payment could not be confirmed."); } } }}>Mark as Paid</button>}
+          {o.payment_status === "awaiting_payment" && <button type="button" className="btn dark order-payment-action" onClick={async () => { if (confirm(`Confirm that you independently verified payment for Order #${o.order_number}?`)) { try { await confirmManualPayment(o.id); await refresh(); try { await sendOrderEmail(o.id, "payment_confirmed"); await refresh(); note("Payment marked as paid and confirmation email sent."); } catch (emailError) { console.error("Payment confirmation email failed:", emailError); await refresh(); note("Payment is confirmed, but the email could not be sent."); } } catch (error) { console.error("Payment confirmation failed:", error); note("Payment could not be confirmed."); } } }}>Mark as Paid</button>}
+          {orderEmail?.status === "failed" && <button type="button" className="product-table-action" onClick={() => void retryEmail("order_created")}>Retry order email</button>}
+          {o.payment_status === "paid" && paymentEmail?.status === "failed" && <button type="button" className="product-table-action" onClick={() => void retryEmail("payment_confirmed")}>Retry payment email</button>}
           {o.payment_status === "awaiting_payment" && o.inventory_reservation_status === "reserved" && <button type="button" className="delete-product product-table-action" onClick={async () => { if (confirm(`Cancel Order #${o.order_number} and restore its reserved inventory?`)) { try { await cancelUnpaidOrder(o.id); await refresh(); note("Unpaid order cancelled and inventory restored."); } catch (error) { console.error("Unpaid order cancellation failed:", error); note("The order could not be cancelled."); } } }}>Cancel & restore stock</button>}
           {view === "active" ? <button className="product-table-action" onClick={async () => { try { await archiveOrders([o.id]); await refresh(); note("Order archived."); } catch (error) { console.error("Order archive failed:", error); note("Order could not be archived."); } }}>Archive order</button> : <button className="product-table-action restore-product" onClick={async () => { try { await restoreOrder(o.id); await refresh(); note("Order restored."); } catch (error) { console.error("Order restore failed:", error); note("Order could not be restored."); } }}>Restore order</button>}
           <button className="delete-product product-table-action" disabled={o.inventory_reservation_status === "reserved"} title={o.inventory_reservation_status === "reserved" ? "Cancel this unpaid order and restore stock before deleting it." : undefined} onClick={async () => { if (confirm(`Permanently delete Order #${o.order_number}? This cannot be undone.`)) { try { await deleteOrders([o.id]); await refresh(); note("Order permanently deleted."); } catch (error) { console.error("Order deletion failed:", error); note("Order could not be deleted. Cancel unpaid reservations before deletion."); } } }}>Delete order permanently</button></div>
