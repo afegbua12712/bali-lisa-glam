@@ -52,6 +52,7 @@ import { getCustomerAccount, saveCustomerAddress, saveCustomerProfile, toggleWis
 import { clearAuthCallbackUrl, friendlyAuthError, getAuthRedirectUrl, isAuthRateLimited } from "./lib/auth";
 import { sendOrderEmail } from "./lib/order-email";
 import { PaymentConfirmationEmailAction } from "./PaymentConfirmationEmailAction";
+import { checkoutFailure, logCheckoutFailure } from "./lib/checkout-errors";
 
 type Product = {
   id: number;
@@ -1069,6 +1070,9 @@ function Checkout({ cart, subtotal, back }: any) {
     setBusy(true);
     let orderCreated = false;
     try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      if (!session) throw { code: "P0001", message: "Authentication required" };
       const order = await createManualOrder(
         cart.map((x: CartLine) => ({ product_id: x.id, quantity: x.quantity, shade: x.shade })),
         address,
@@ -1136,10 +1140,12 @@ Thank you.`;
       if (method === "manual_email" && settings.business_email) {
         window.location.href = `mailto:${settings.business_email}?subject=${encodeURIComponent(`Payment Request - Order #${orderSummary.order_number}`)}&body=${encodedMessage}`;
       }
-    } catch {
+    } catch (error) {
       if (!orderCreated) {
         orderSubmissionStarted.current = false;
-        setError("We could not create your order. Please check your details and try again.");
+        const failure = checkoutFailure(error);
+        logCheckoutFailure(failure);
+        setError(failure.message);
       } else {
         setError("Your order was created, but we could not open the payment contact link.");
       }
