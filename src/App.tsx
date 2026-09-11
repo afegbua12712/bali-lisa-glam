@@ -51,6 +51,7 @@ import {
 import { getCustomerAccount, saveCustomerAddress, saveCustomerProfile, toggleWishlist } from "./lib/customer";
 import { clearAuthCallbackUrl, friendlyAuthError, getAuthRedirectUrl, isAuthRateLimited } from "./lib/auth";
 import { sendOrderEmail } from "./lib/order-email";
+import { PaymentConfirmationEmailAction } from "./PaymentConfirmationEmailAction";
 
 type Product = {
   id: number;
@@ -1692,7 +1693,7 @@ function Admin({ note }: any) {
             }}
           />
         ) : active === "Orders" ? (
-          <AdminOrders orders={orders} refresh={load} note={note} />
+          <AdminOrders orders={orders} refresh={load} refreshEmails={async () => setOrders(await fetchAdminOrders())} note={note} />
         ) : active === "Customers" ? (
           <AdminCustomers customers={customers} />
         ) : (
@@ -1944,7 +1945,7 @@ const orderStatusLabel = (status?: string | null) =>
     status ?? ""
   ] ?? "Pending";
 
-function AdminOrders({ orders, refresh, note }: any) {
+function AdminOrders({ orders, refresh, refreshEmails, note }: any) {
   const [view, setView] = useState<"active" | "archived">("active");
   const [search, setSearch] = useState("");
   const [paymentFilter, setPaymentFilter] = useState("all");
@@ -2012,7 +2013,7 @@ function AdminOrders({ orders, refresh, note }: any) {
         <div className="order-actions"><button className="product-table-action" onClick={() => setDetailId(detailId === o.id ? null : o.id)}>{detailId === o.id ? "Hide details" : "View details"}</button><div><span>Order status</span><label className="status-select"><span className="sr-only">Order status</span><select disabled={o.inventory_reservation_status === "reserved"} title={o.inventory_reservation_status === "reserved" ? "Confirm payment or cancel and restore stock first." : undefined} value={o.status} onChange={async (event) => { try { await updateOrderStatus(o.id, event.target.value as any); await refresh(); note("Order status updated."); } catch (error) { console.error("Order status update failed:", error); note("Order status could not be updated."); } }}>{["pending", "paid", "fulfilled", "cancelled", "refunded"].map((status) => <option key={status} value={status}>{orderStatusLabel(status)}</option>)}</select></label></div>
           {o.payment_status === "awaiting_payment" && <button type="button" className="btn dark order-payment-action" onClick={async () => { if (confirm(`Confirm that you independently verified payment for Order #${o.order_number}?`)) { try { await confirmManualPayment(o.id); await refresh(); try { await sendOrderEmail(o.id, "payment_confirmed"); await refresh(); note("Payment marked as paid and confirmation email sent."); } catch (emailError) { console.error("Payment confirmation email failed:", emailError); await refresh(); note("Payment is confirmed, but the email could not be sent."); } } catch (error) { console.error("Payment confirmation failed:", error); note("Payment could not be confirmed."); } } }}>Mark as Paid</button>}
           {orderEmail?.status === "failed" && <button type="button" className="product-table-action" onClick={() => void retryEmail("order_created")}>Retry order email</button>}
-          {o.payment_status === "paid" && paymentEmail?.status === "failed" && <button type="button" className="product-table-action" onClick={() => void retryEmail("payment_confirmed")}>Retry payment email</button>}
+          {o.payment_status === "paid" && <PaymentConfirmationEmailAction orderId={o.id} paymentStatus={o.payment_status} notification={paymentEmail} refresh={refreshEmails} />}
           {o.payment_status === "awaiting_payment" && o.inventory_reservation_status === "reserved" && <button type="button" className="delete-product product-table-action" onClick={async () => { if (confirm(`Cancel Order #${o.order_number} and restore its reserved inventory?`)) { try { await cancelUnpaidOrder(o.id); await refresh(); note("Unpaid order cancelled and inventory restored."); } catch (error) { console.error("Unpaid order cancellation failed:", error); note("The order could not be cancelled."); } } }}>Cancel & restore stock</button>}
           {view === "active" ? <button className="product-table-action" onClick={async () => { try { await archiveOrders([o.id]); await refresh(); note("Order archived."); } catch (error) { console.error("Order archive failed:", error); note("Order could not be archived."); } }}>Archive order</button> : <button className="product-table-action restore-product" onClick={async () => { try { await restoreOrder(o.id); await refresh(); note("Order restored."); } catch (error) { console.error("Order restore failed:", error); note("Order could not be restored."); } }}>Restore order</button>}
           <button className="delete-product product-table-action" disabled={o.inventory_reservation_status === "reserved"} title={o.inventory_reservation_status === "reserved" ? "Cancel this unpaid order and restore stock before deleting it." : undefined} onClick={async () => { if (confirm(`Permanently delete Order #${o.order_number}? This cannot be undone.`)) { try { await deleteOrders([o.id]); await refresh(); note("Order permanently deleted."); } catch (error) { console.error("Order deletion failed:", error); note("Order could not be deleted. Cancel unpaid reservations before deletion."); } } }}>Delete order permanently</button></div>
