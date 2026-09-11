@@ -1,4 +1,5 @@
 const messages = {
+  product_options: 'Some product choices are no longer available. Please remove the affected item from your bag and choose its options again.',
   stock: 'This item no longer has enough stock. Please update your bag.',
   product_unavailable: 'One of the products in your bag is no longer available.',
   authentication: 'Please sign in again and retry checkout.',
@@ -16,6 +17,7 @@ const messages = {
 } as const
 
 const businessErrors: Record<string, keyof typeof messages> = {
+  'Invalid product options': 'product_options',
   'Authentication required': 'authentication',
   'Order needs at least one item': 'empty_bag',
   'Invalid order line': 'invalid_line',

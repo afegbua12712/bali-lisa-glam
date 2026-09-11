@@ -102,7 +102,8 @@ test('Edge Function renders a claimed payment email and only updates its ledger'
   assert.equal(compiled.diagnostics.length, 0)
   let handler; let providerCalls = 0; let ledgerUpdate
   const order = { id: 'synthetic-order', order_number: 42, payment_status: 'paid', currency: 'CAD',
-    subtotal_cents: 1000, shipping_cents: 0, total_cents: 1000, order_items: [],
+    subtotal_cents: 1000, shipping_cents: 0, total_cents: 1000,
+    order_items: [{ product_name: 'Fixture product', shade: 'Shade: Rose · Size: M', quantity: 1, unit_price_cents: 1000 }],
     shipping_address: { country: 'Canada', email: 'customer@example.test' } }
   const createClient = (_url, key, options) => key === 'caller-key' ? {
     auth: { getUser: async () => { assert.equal(options.global.headers.Authorization, 'Bearer synthetic-session'); return { data: { user: { id: 'synthetic-admin' } } } } },
@@ -125,6 +126,8 @@ test('Edge Function renders a claimed payment email and only updates its ledger'
       const body = JSON.parse(options.body)
       assert.equal(body.from, 'Example Shop <noreply@example.test>')
       assert.match(body.subject, /Payment confirmed/)
+      assert.ok(body.html.includes('Shade: Rose · Size: M'))
+      assert.ok(body.text.includes('Shade: Rose · Size: M'))
       return Response.json({ id: 'synthetic-provider-id' })
     })
   const response = await handler(new Request('https://example.test', { method: 'POST', headers: { Authorization: 'Bearer synthetic-session' }, body: JSON.stringify({ order_id: order.id, event_type: 'payment_confirmed' }) }))

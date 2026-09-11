@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { normalizeOptions, type OptionGroup, type OptionSelection } from './product-options'
 
 export type StoreProduct = {
   id: number
@@ -13,25 +14,28 @@ export type StoreProduct = {
   badge?: string
   new?: boolean
   inventory: number
+  options: OptionGroup[]
 }
 
 type ProductRow = {
   id: number; name: string; price_cents: number; rating: number; review_count: number; image_url: string
   description: string; shades: string[]; badge: string | null; is_new: boolean; inventory_quantity: number
   categories: { name: string } | null
+  product_option_groups: Parameters<typeof normalizeOptions>[0]
 }
 
 export async function fetchProducts(): Promise<StoreProduct[]> {
-  const { data, error } = await supabase.from('products').select('id,name,price_cents,rating,review_count,image_url,description,shades,badge,is_new,inventory_quantity,categories(name)').eq('is_active', true).order('created_at', { ascending: false })
+  const { data, error } = await supabase.from('products').select('id,name,price_cents,rating,review_count,image_url,description,shades,badge,is_new,inventory_quantity,categories(name),product_option_groups(id,name,display_order,required,product_option_values(id,label,display_order,active,color))').eq('is_active', true).order('created_at', { ascending: false })
   if (error) throw error
   return (data as unknown as ProductRow[]).map(product => ({
     id: product.id, name: product.name, category: product.categories?.name ?? 'Beauty', price: product.price_cents / 100,
     rating: product.rating, reviews: product.review_count, image: product.image_url, description: product.description,
     shades: product.shades, badge: product.badge ?? undefined, new: product.is_new, inventory: product.inventory_quantity,
+    options: normalizeOptions(product.product_option_groups),
   }))
 }
 
-export async function createOrder(lines: Array<{ product_id: number; quantity: number; shade: string }>, address: Record<string, string>) {
+export async function createOrder(lines: Array<{ product_id: number; quantity: number; shade: string; selected_options?: OptionSelection[] }>, address: Record<string, string>) {
   const { data, error } = await supabase.rpc('create_order', { lines, shipping_address: address })
   if (error) throw error
   return data as string

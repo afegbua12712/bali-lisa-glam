@@ -22,6 +22,11 @@ import {
 import "./App.css";
 import "./readability.css";
 import "./mobile.css";
+import "./product-options.css";
+import { CartButton } from "./CartButton";
+import { ProductOptionsEditor } from "./ProductOptionsEditor";
+import { ProductOptionSelectors } from "./ProductOptionSelectors";
+import { cartLineKey, cartQuantity, optionSummary, selectProductOptions, validateOptionEditor, type OptionGroup, type OptionSelection } from "./lib/product-options";
 import { supabase } from "./lib/supabase";
 import { createOrder, fetchProducts, getAdminMetrics, getProfile } from "./lib/store";
 import {
@@ -64,10 +69,11 @@ type Product = {
   image: string;
   description: string;
   shades: string[];
+  options?: OptionGroup[];
   badge?: string;
   new?: boolean;
 };
-type CartLine = Product & { quantity: number; shade: string };
+type CartLine = Product & { quantity: number; shade: string; selected_options?: OptionSelection[] };
 const products: Product[] = [];
 const categories = [
   [
@@ -129,19 +135,27 @@ export default function App() {
     setToast(s);
     setTimeout(() => setToast(""), 2500);
   };
-  const add = (p: Product, shade = p.shades[0]) => {
+  const add = (input: Product, shade?: string, selected_options?: OptionSelection[], quantity = 1) => {
+    const p = products.find(item => item.id === input.id) ?? input;
+    if (p.options?.length && selected_options === undefined) {
+      setActive(p);
+      go("product");
+      return;
+    }
+    const line = { ...p, shade: shade ?? "", selected_options, quantity };
     setCart((current) => {
-      const found = current.find((x) => x.id === p.id && x.shade === shade);
+      const found = current.find((x) => cartLineKey(x) === cartLineKey(line));
       const stock = (p as Product & { inventory?: number }).inventory;
-      if (stock !== undefined && (found?.quantity ?? 0) >= stock) {
+      const inBag = current.filter(x => x.id === p.id).reduce((sum, x) => sum + x.quantity, 0);
+      if (stock !== undefined && inBag + quantity > stock) {
         note("That item is at its available stock limit.");
         return current;
       }
+      note(`${p.name} added to bag`);
       return found
-        ? current.map((x) => (x === found ? { ...x, quantity: x.quantity + 1 } : x))
-        : [...current, { ...p, shade, quantity: 1 }];
+        ? current.map((x) => (x === found ? { ...x, quantity: x.quantity + quantity } : x))
+        : [...current, line];
     });
-    note(`${p.name} added to bag`);
   };
   const show = (p: Product) => {
     setActive(p);
@@ -168,16 +182,19 @@ export default function App() {
   }, [category, query, sort, catalogVersion]);
   useEffect(() => {
     let alive = true;
-    fetchProducts()
+    const refreshCatalog = () => { void fetchProducts()
       .then((data) => {
         if (alive) {
           products.splice(0, products.length, ...data);
           setCatalogVersion((v) => v + 1);
         }
       })
-      .catch(() => note("The collection is temporarily unavailable."));
+      .catch(() => note("The collection is temporarily unavailable.")); };
+    refreshCatalog();
+    window.addEventListener("blg:catalog-updated", refreshCatalog);
     return () => {
       alive = false;
+      window.removeEventListener("blg:catalog-updated", refreshCatalog);
     };
   }, []);
   useEffect(() => {
@@ -236,7 +253,7 @@ export default function App() {
         list for 15% off
       </div>
       <Header
-        count={cart.reduce((s, x) => s + x.quantity, 0)}
+        count={cartQuantity(cart)}
         page={page}
         isAdmin={isAdmin}
         go={go}
@@ -353,6 +370,7 @@ export default function App() {
                     product_id: item.id,
                     quantity: item.quantity,
                     shade: item.shade,
+                    selected_options: item.selected_options,
                   })),
                   {},
                 );
@@ -372,19 +390,19 @@ export default function App() {
         close={() => setCartOpen(false)}
         cart={cart}
         subtotal={subtotal}
-        update={(id: number, shade: string, n: number) =>
+        update={(key: string, n: number) =>
           setCart((c) =>
             c
               .map((x) =>
-                x.id === id && x.shade === shade
+                cartLineKey(x) === key
                   ? { ...x, quantity: Math.max(0, x.quantity + n) }
                   : x,
               )
               .filter((x) => x.quantity),
           )
         }
-        remove={(id: number, shade: string) =>
-          setCart((c) => c.filter((x) => !(x.id === id && x.shade === shade)))
+        remove={(key: string) =>
+          setCart((c) => c.filter((x) => cartLineKey(x) !== key))
         }
         checkout={() => {
           setCartOpen(false);
@@ -422,10 +440,7 @@ function Header({ count, page, isAdmin, go, cart, menu, search }: any) {
         <button className={`icon account ${page === "account" ? "active" : ""}`} aria-label="Account" onClick={() => go("account")}>
           <UserRound size={21} />
         </button>
-        <button className="bag" onClick={cart}>
-          <ShoppingBag size={21} />
-          <span>Bag {count ? `(${count})` : ""}</span>
-        </button>
+        <CartButton count={count} onClick={cart} />
       </div>
     </header>
   );
@@ -808,11 +823,13 @@ function BeautyGuide({ shopLips }: any) {
   );
 }
 function Detail({ product, back, add }: any) {
-  const [shade, setShade] = useState(product.shades[0]),
+  const [selected, setSelected] = useState<Record<string, string>>({}),
+    [optionError, setOptionError] = useState(""),
     [qty, setQty] = useState(1),
     [tab, setTab] = useState("Details");
   useEffect(() => {
-    setShade(product.shades[0]);
+    setSelected({});
+    setOptionError("");
     setQty(1);
   }, [product]);
   return (
@@ -833,21 +850,8 @@ function Detail({ product, back, add }: any) {
           </div>
           <h3>{money(product.price)}</h3>
           <p className="desc">{product.description}</p>
-          <div className="shade-label">
-            <span>Choose a shade</span>
-            <b>{shade}</b>
-          </div>
-          <div className="shades">
-            {product.shades.map((x: string, i: number) => (
-              <button
-                key={x}
-                className={shade === x ? "active" : ""}
-                onClick={() => setShade(x)}
-                title={x}
-                style={{ background: ["#ead8cf", "#c99070", "#a36048", "#51302c"][i % 4] }}
-              />
-            ))}
-          </div>
+          <ProductOptionSelectors groups={product.options ?? []} selected={selected} onChange={value => { setSelected(value); setOptionError(""); }} />
+          {optionError && <p role="alert">{optionError}</p>}
           <div className="purchase">
             <div className="quantity">
               <button onClick={() => setQty(Math.max(1, qty - 1))}>
@@ -861,7 +865,9 @@ function Detail({ product, back, add }: any) {
             <button
               className="btn dark"
               onClick={() => {
-                for (let i = 0; i < qty; i++) add(product, shade);
+                const result = selectProductOptions(product.options ?? [], selected);
+                if (result.error) { setOptionError(result.error); return; }
+                add(product, optionSummary(result.choices), result.choices, qty);
               }}
             >
               Add to bag — {money(product.price * qty)}
@@ -920,7 +926,7 @@ function Cart({ open, close, cart, subtotal, update, remove, checkout }: any) {
           <>
             <div className="lines">
               {cart.map((x: CartLine) => (
-                <div className="line" key={`${x.id}-${x.shade}`}>
+                <div className="line" key={cartLineKey(x)}>
                   <img src={x.image} alt="" />
                   <div>
                     <p>{x.category}</p>
@@ -928,15 +934,15 @@ function Cart({ open, close, cart, subtotal, update, remove, checkout }: any) {
                     <span>{x.shade}</span>
                     <div className="line-foot">
                       <div className="mini-qty">
-                        <button onClick={() => update(x.id, x.shade, -1)}>
+                        <button onClick={() => update(cartLineKey(x), -1)}>
                           <Minus size={13} />
                         </button>
                         {x.quantity}
-                        <button onClick={() => update(x.id, x.shade, 1)}>
+                        <button onClick={() => update(cartLineKey(x), 1)}>
                           <Plus size={13} />
                         </button>
                       </div>
-                      <button onClick={() => remove(x.id, x.shade)}>
+                      <button onClick={() => remove(cartLineKey(x))}>
                         <Trash2 size={16} />
                       </button>
                     </div>
@@ -1074,7 +1080,7 @@ function Checkout({ cart, subtotal, back }: any) {
       if (sessionError) throw sessionError;
       if (!session) throw { code: "P0001", message: "Authentication required" };
       const order = await createManualOrder(
-        cart.map((x: CartLine) => ({ product_id: x.id, quantity: x.quantity, shade: x.shade })),
+        cart.map((x: CartLine) => ({ product_id: x.id, quantity: x.quantity, shade: x.shade, selected_options: x.selected_options })),
         address,
         method,
         checkoutIdempotencyKey.current,
@@ -1093,7 +1099,7 @@ function Checkout({ cart, subtotal, back }: any) {
           const lineTotal = item.unit_price_cents * item.quantity;
           return [
             `${index + 1}. ${item.product_name}`,
-            item.shade ? `   Color/Variant: ${item.shade}` : null,
+            item.shade ? `   Options: ${item.shade}` : null,
             `   Quantity: ${item.quantity}`,
             `   Price: ${formatOrderTotal(item.unit_price_cents)}`,
             `   Subtotal: ${formatOrderTotal(lineTotal)}`,
@@ -1318,10 +1324,11 @@ Thank you.`;
         <aside className="summary">
           <h3>Order summary</h3>
           {cart.map((x: CartLine) => (
-            <div className="summary-line" key={x.id}>
+            <div className="summary-line" key={cartLineKey(x)}>
               <img src={x.image} alt="" />
               <span>
                 {x.name} <small>× {x.quantity}</small>
+                {x.shade && <small className="summary-options">{x.shade}</small>}
               </span>
               <b>{money(x.price * x.quantity)}</b>
             </div>
@@ -1553,6 +1560,8 @@ function Admin({ note }: any) {
   }, [editing]);
   const saveProduct = async (e: FormEvent) => {
     e.preventDefault();
+    const optionError = validateOptionEditor(editing.options ?? []);
+    if (optionError) { setEditorError(optionError); return; }
     try {
       setEditorError("");
       let imageUrl = editing.image_url;
@@ -1566,6 +1575,7 @@ function Admin({ note }: any) {
       setImageFile(null);
       setImagePreview("");
       await load();
+      window.dispatchEvent(new Event("blg:catalog-updated"));
       note("Product saved.");
     } catch (saveError: any) {
       console.error("Studio product save failed:", saveError);
@@ -1633,6 +1643,7 @@ function Admin({ note }: any) {
                   category_id: categories[0]?.id ?? null,
                   image_url: "",
                   shades: ["Universal"],
+                  options: [],
                   is_active: true,
                 });
               }}
@@ -1799,6 +1810,7 @@ function Admin({ note }: any) {
                     ))}
                   </select>
                 </label>
+                <ProductOptionsEditor groups={editing.options ?? []} onChange={options => setEditing({ ...editing, options })} />
                 {editorError && (
                   <p className="product-editor-error" role="alert">
                     {editorError}
@@ -2014,7 +2026,7 @@ function AdminOrders({ orders, refresh, refreshEmails, note }: any) {
       return <article className="order-card" key={o.id}>
         <header className="order-card-header"><label className="order-select"><input type="checkbox" checked={selected.includes(o.id)} onChange={() => toggleSelected(o.id)} /><span className="sr-only">Select order #{o.order_number}</span></label><div><p>Order reference</p><h2>#{o.order_number ?? o.id.slice(0, 8)}</h2></div><span className={`status-badge payment-${o.payment_status ?? "awaiting_payment"}`}>Payment: {paymentStatusLabel(o.payment_status)}</span></header>
         <div className="order-meta"><div><span>Customer</span><b>{customerName}</b><small>{o.profiles?.email ?? "No email available"}</small></div><div><span>Date</span><b>{new Date(o.created_at).toLocaleString("en-CA")}</b></div><div><span>Total</span><b>{orderMoney(o.total_cents, o.currency ?? "CAD")}</b></div><div><span>Payment method</span><b>{paymentMethodLabel(o.payment_method)}</b></div></div>
-        <div className="order-products"><h3>Products</h3><ul>{o.order_items?.map((item: any) => <li key={`${o.id}-${item.product_name}-${item.shade ?? "standard"}`}><b>{item.product_name}</b>{item.shade && <span>Color/Variant: {item.shade}</span>}<span>Quantity: {item.quantity} · {orderMoney(item.unit_price_cents, o.currency ?? "CAD")} each · Subtotal: {orderMoney(item.unit_price_cents * item.quantity, o.currency ?? "CAD")}</span></li>)}</ul></div>
+        <div className="order-products"><h3>Products</h3><ul>{o.order_items?.map((item: any) => <li key={`${o.id}-${item.product_name}-${item.shade ?? "standard"}`}><b>{item.product_name}</b>{item.shade && <span>Options: {item.shade}</span>}<span>Quantity: {item.quantity} · {orderMoney(item.unit_price_cents, o.currency ?? "CAD")} each · Subtotal: {orderMoney(item.unit_price_cents * item.quantity, o.currency ?? "CAD")}</span></li>)}</ul></div>
         {detailId === o.id && <div className="order-detail"><div><span>Delivery</span><b>{[address.address, address.unit, `${address.city ?? ""}${address.province ? `, ${address.province}` : ""}`, address.postal_code, address.country].filter(Boolean).join(" · ")}</b><small>{address.phone ? `Phone: ${address.phone}` : ""}</small></div><div><span>Payment</span><b>{paymentMethodLabel(o.payment_method)} · {paymentStatusLabel(o.payment_status)}</b><small>{o.paid_at ? `Paid: ${new Date(o.paid_at).toLocaleString("en-CA")}` : o.payment_expires_at ? `Payment requested before: ${new Date(o.payment_expires_at).toLocaleString("en-CA")}` : "Not yet paid"}</small></div><div><span>Email notifications</span><b>Order email: {orderEmail?.status ?? "not sent"}</b><small>{o.payment_status === "paid" ? `Payment email: ${paymentEmail?.status ?? "not sent"}` : "Payment email is sent only after payment confirmation."}</small></div><div><span>Inventory</span><b>{o.inventory_reservation_status === "reserved" ? "Reserved for this unpaid order" : o.inventory_reservation_status === "restored" ? "Restored to stock" : o.inventory_reservation_status === "committed" ? "Committed to paid order" : "Legacy order — not tracked"}</b><small>{o.inventory_restored_at ? `Restored: ${new Date(o.inventory_restored_at).toLocaleString("en-CA")}` : o.cancellation_reason ?? ""}</small></div><div><span>Totals</span><b>Shipping {orderMoney(o.shipping_cents, o.currency ?? "CAD")} · Total {orderMoney(o.total_cents, o.currency ?? "CAD")}</b><small>Order status: {orderStatusLabel(o.status)}</small></div></div>}
         <div className="order-actions"><button className="product-table-action" onClick={() => setDetailId(detailId === o.id ? null : o.id)}>{detailId === o.id ? "Hide details" : "View details"}</button><div><span>Order status</span><label className="status-select"><span className="sr-only">Order status</span><select disabled={o.inventory_reservation_status === "reserved"} title={o.inventory_reservation_status === "reserved" ? "Confirm payment or cancel and restore stock first." : undefined} value={o.status} onChange={async (event) => { try { await updateOrderStatus(o.id, event.target.value as any); await refresh(); note("Order status updated."); } catch (error) { console.error("Order status update failed:", error); note("Order status could not be updated."); } }}>{["pending", "paid", "fulfilled", "cancelled", "refunded"].map((status) => <option key={status} value={status}>{orderStatusLabel(status)}</option>)}</select></label></div>
           {o.payment_status === "awaiting_payment" && <button type="button" className="btn dark order-payment-action" onClick={async () => { if (confirm(`Confirm that you independently verified payment for Order #${o.order_number}?`)) { try { await confirmManualPayment(o.id); await refresh(); try { await sendOrderEmail(o.id, "payment_confirmed"); await refresh(); note("Payment marked as paid and confirmation email sent."); } catch (emailError) { console.error("Payment confirmation email failed:", emailError); await refresh(); note("Payment is confirmed, but the email could not be sent."); } } catch (error) { console.error("Payment confirmation failed:", error); note("Payment could not be confirmed."); } } }}>Mark as Paid</button>}

@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { normalizeOptions, type OptionGroup } from './product-options'
 
 const PRODUCT_IMAGES_BUCKET = 'product-images'
 const IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
@@ -6,14 +7,15 @@ const IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
 export type AdminProductInput = {
   name: string; slug: string; description: string; price_cents: number; inventory_quantity: number
   category_id: number | null; image_url: string; shades: string[]; is_active: boolean
+  options: OptionGroup[]
 }
 
 export async function fetchAdminProducts(query = '') {
-  let request = supabase.from('products').select('id,name,slug,description,price_cents,inventory_quantity,is_active,image_url,shades,created_at,categories(id,name)').order('created_at', { ascending: false })
+  let request = supabase.from('products').select('id,name,slug,description,price_cents,inventory_quantity,is_active,image_url,shades,created_at,categories(id,name),product_option_groups(id,name,display_order,required,product_option_values(id,label,display_order,active,color))').order('created_at', { ascending: false })
   if (query.trim()) request = request.ilike('name', `%${query.trim()}%`)
   const { data, error } = await request
   if (error) throw error
-  return data ?? []
+  return (data ?? []).map(product => ({ ...product, options: normalizeOptions(product.product_option_groups) }))
 }
 
 export async function fetchAdminCategories() {
@@ -23,7 +25,7 @@ export async function fetchAdminCategories() {
 }
 
 export async function saveAdminProduct(input: AdminProductInput, id?: number) {
-  const payload: AdminProductInput & { updated_at: string } = {
+  const payload = {
     name: input.name.trim(),
     slug: input.slug.trim(),
     description: input.description.trim(),
@@ -35,8 +37,13 @@ export async function saveAdminProduct(input: AdminProductInput, id?: number) {
     is_active: input.is_active ?? true,
     updated_at: new Date().toISOString(),
   }
-  const request = id ? supabase.from('products').update(payload).eq('id', id) : supabase.from('products').insert(payload)
-  const { data, error } = await request.select().single()
+  const { data, error } = await supabase.rpc('save_product_with_options', {
+    target_product_id: id ?? null,
+    product_data: payload,
+    option_groups: (input.options ?? []).map((group, display_order) => ({ ...group, name: group.name.trim(), display_order,
+      values: group.values.map((value, index) => ({ ...value, label: value.label.trim(), display_order: index })),
+    })),
+  })
   if (error) throw error
   return data
 }

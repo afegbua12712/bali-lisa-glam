@@ -14,6 +14,7 @@ test('all explicit checkout business rejections map to fixed customer messages',
   const cases = [
     ['Insufficient inventory for Synthetic private product', 'stock'],
     ['A product is unavailable', 'product_unavailable'],
+    ['Invalid product options', 'product_options'],
     ['Authentication required', 'authentication'],
     ['Order needs at least one item', 'empty_bag'],
     ['Invalid order line', 'invalid_line'],

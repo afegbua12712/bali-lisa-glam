@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import type { OptionSelection } from './product-options'
 
 export type ManualPaymentMethod = 'manual_whatsapp' | 'manual_email'
 
@@ -13,7 +14,7 @@ export type CreatedManualOrder = {
   already_existed: boolean
 }
 
-export async function createManualOrder(lines: Array<{ product_id: number; quantity: number; shade: string }>, shippingAddress: Record<string, string>, method: ManualPaymentMethod, idempotencyKey: string) {
+export async function createManualOrder(lines: Array<{ product_id: number; quantity: number; shade: string; selected_options?: OptionSelection[] }>, shippingAddress: Record<string, string>, method: ManualPaymentMethod, idempotencyKey: string) {
   const { data, error } = await supabase.rpc('create_manual_order', { lines, shipping_address: shippingAddress, selected_payment_method: method, idempotency_key: idempotencyKey })
   if (error) throw error
   return (data as CreatedManualOrder[])[0]
