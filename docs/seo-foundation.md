@@ -16,14 +16,15 @@ metadata helps the current browser view but does not provide distinct search
 listings or reliable per-product social previews. Social crawlers that do not
 execute JavaScript receive the static homepage metadata.
 
-Manual branding decision
+Approved branding assets
 ------------------------
-The existing functional favicon is preserved; it is not asserted to be an
-approved brand logo. Supply approved favicon and social-preview artwork later.
-Replace public/favicon.svg (or update its link for a different format). Put the
-approved sharing image in public/ and add matching og:image/twitter:image tags
-with its absolute https://balilisaglam.com/ URL and descriptive image alt tags
-in index.html. No missing image URL or invented permanent branding is published.
+public/bali-lisa-favicon.png is the approved PNG browser icon (1254 x 1254).
+The previous favicon.svg remains unused. public/bali-lisa-social-preview.png
+is the approved default sharing image (1774 x 887). Static HTML and the dynamic
+SEO helper use its absolute production URL, image type, dimensions and brand
+alt text, with Twitter's summary_large_image card. Both PNGs are used unchanged.
+The favicon is approximately 1.87 MB; a smaller approved export could reduce
+download size later, but the supplied artwork has not been optimized or altered.
 
 Decorative editorial stock images no longer claim to depict the founder,
 customers or community; their empty alt text avoids unsupported identities.
@@ -31,7 +32,10 @@ Meaningful product-name and category alt text is preserved.
 
 Validation
 ----------
-All 36 tests pass, including four focused SEO tests and existing regressions.
+All 37 tests pass, including five focused SEO tests and existing regressions.
+The branding integration passes lint and production build. Both supplied PNGs
+are included byte-for-byte in dist, and the built HTML references the approved
+favicon and the balilisaglam.com social image URL.
 Lint passes with three existing hook-dependency warnings; the production build
 passes with the existing bundle-size warning. Local headless Chrome checks at
 1280, 768, 390 and 320 pixels verified policy metadata, direct links/refresh,

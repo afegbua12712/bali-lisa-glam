@@ -56,6 +56,13 @@ test('metadata updates existing elements, creates missing elements and treats pr
   assert.equal(doc.head.querySelector('link[rel="canonical"]').attributes.href, seo.SITE_URL)
   seo.applyMetadata(seo.metadataFor('privacy'), doc)
   assert.equal(doc.title, 'Privacy Policy | Bali & Lisa Glam')
+  for (const view of ['home', 'shop', 'product', 'contact']) {
+    seo.applyMetadata(seo.metadataFor(view), doc)
+    assert.equal(elements.length, count)
+    assert.equal(doc.head.querySelector('meta[property="og:image"]').attributes.content, seo.SOCIAL_IMAGE_URL)
+    assert.equal(doc.head.querySelector('meta[name="twitter:image"]').attributes.content, seo.SOCIAL_IMAGE_URL)
+    assert.equal(doc.head.querySelector('meta[name="twitter:card"]').attributes.content, 'summary_large_image')
+  }
 })
 
 test('static defaults match home metadata, structured data is minimal and sitemap includes only homepage', () => {
@@ -67,7 +74,23 @@ test('static defaults match home metadata, structured data is minimal and sitema
   for (const key of ['og:title', 'og:description', 'og:site_name', 'og:url', 'og:type', 'twitter:card', 'twitter:title', 'twitter:description']) assert.ok(html.includes(`="${key}"`))
   const schema = JSON.parse(html.match(/<script type="application\/ld\+json">(.*?)<\/script>/s)[1])
   assert.deepEqual(schema, { '@context': 'https://schema.org', '@type': 'WebSite', name: seo.SITE_NAME, url: seo.SITE_URL })
-  assert.ok(html.includes('href="/favicon.svg"'))
+  assert.ok(html.includes('type="image/png" sizes="1254x1254" href="/bali-lisa-favicon.png"'))
+  assert.ok(html.includes(`property="og:image" content="${seo.SOCIAL_IMAGE_URL}"`))
+  assert.ok(html.includes(`name="twitter:image" content="${seo.SOCIAL_IMAGE_URL}"`))
+  assert.ok(html.includes('name="twitter:card" content="summary_large_image"'))
+  assert.ok(!html.includes('vercel.app'))
   assert.deepEqual([...read('public/sitemap.xml').matchAll(/<loc>(.*?)<\/loc>/g)].map(match => match[1]), [seo.SITE_URL])
   assert.ok(read('public/robots.txt').includes(`Sitemap: ${seo.SITE_URL}sitemap.xml`))
+})
+
+test('approved PNG dimensions match the declared image metadata', () => {
+  for (const [file, width, height] of [['bali-lisa-favicon.png', 1254, 1254], ['bali-lisa-social-preview.png', 1774, 887]]) {
+    const bytes = readFileSync(new URL(`../public/${file}`, import.meta.url))
+    assert.equal(bytes.subarray(0, 8).toString('hex'), '89504e470d0a1a0a')
+    assert.equal(bytes.readUInt32BE(16), width)
+    assert.equal(bytes.readUInt32BE(20), height)
+  }
+  const html = read('index.html')
+  assert.ok(html.includes('property="og:image:width" content="1774"'))
+  assert.ok(html.includes('property="og:image:height" content="887"'))
 })

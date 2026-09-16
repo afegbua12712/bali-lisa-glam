@@ -2,6 +2,7 @@ import { supportPageFromHash, type SupportPage } from './support-pages'
 
 export const SITE_URL = 'https://balilisaglam.com/'
 export const SITE_NAME = 'Bali & Lisa Glam'
+export const SOCIAL_IMAGE_URL = `${SITE_URL}bali-lisa-social-preview.png`
 export type SeoView = 'home' | 'shop' | 'product' | 'story' | 'guide' | 'account' | 'admin' | 'checkout' | 'not-found' | SupportPage
 const pages: Record<SeoView, [string, string]> = {
   home: ['Beauty & Cosmetics', 'Shop beauty and cosmetics at Bali & Lisa Glam. Explore product options and shipping to Canada and supported international destinations.'],
@@ -59,7 +60,14 @@ export function applyMetadata(metadata: ReturnType<typeof metadataFor>, doc: Doc
   meta('property', 'og:title', metadata.title)
   meta('property', 'og:description', metadata.description)
   meta('property', 'og:url', SITE_URL)
-  meta('name', 'twitter:card', 'summary')
+  meta('property', 'og:image', SOCIAL_IMAGE_URL)
+  meta('property', 'og:image:type', 'image/png')
+  meta('property', 'og:image:width', '1774')
+  meta('property', 'og:image:height', '887')
+  meta('property', 'og:image:alt', SITE_NAME)
+  meta('name', 'twitter:card', 'summary_large_image')
+  meta('name', 'twitter:image', SOCIAL_IMAGE_URL)
+  meta('name', 'twitter:image:alt', SITE_NAME)
   meta('name', 'twitter:title', metadata.title)
   meta('name', 'twitter:description', metadata.description)
   let canonical = doc.head.querySelector<HTMLLinkElement>('link[rel="canonical"]')
