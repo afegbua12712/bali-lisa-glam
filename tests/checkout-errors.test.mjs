@@ -63,7 +63,7 @@ test('checkout blocks missing sessions and preserves the key on RPC rejection', 
     const key = { current: 'synthetic-existing-key' }
     const started = { current: false }
     const context = {
-      step: 2, settings: {}, orderSubmissionStarted: started,
+      step: 2, settings: {}, stockError: "", paymentContact: () => "mailto:help@example.test", setNeedsSignIn: () => {}, orderSubmissionStarted: started,
       setBusy: () => {}, setError: value => { message = value },
       supabase: { auth: { getSession: async () => ({ data: { session: hasSession ? {} : null }, error: null }) } },
       cart: [], address: {}, method: 'manual_email', checkoutIdempotencyKey: key,

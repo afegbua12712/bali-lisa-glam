@@ -60,6 +60,7 @@ import { getCustomerAccount, saveCustomerAddress, saveCustomerProfile, toggleWis
 import { clearAuthCallbackUrl, friendlyAuthError, getAuthRedirectUrl, isAuthRateLimited } from "./lib/auth";
 import { sendOrderEmail } from "./lib/order-email";
 import { PaymentConfirmationEmailAction } from "./PaymentConfirmationEmailAction";
+import { availableQuantity, bagStockError, paymentContact, paymentHref, readCheckoutDraft } from "./lib/checkout-journey";
 import { checkoutFailure, logCheckoutFailure } from "./lib/checkout-errors";
 
 type Product = {
@@ -72,6 +73,7 @@ type Product = {
   image: string;
   description: string;
   shades: string[];
+  inventory?: number;
   options?: OptionGroup[];
   badge?: string;
   new?: boolean;
@@ -127,6 +129,13 @@ export default function App() {
       JSON.parse(sessionStorage.getItem("blg-cart") ?? "[]"),
     ),
     [catalogVersion, setCatalogVersion] = useState(0);
+  const requestCheckoutSignIn = () => { sessionStorage.setItem("blg-checkout-return", "true"); setUser(null); go("account"); };
+  useEffect(() => {
+    if (user && authIntent !== "recovery" && sessionStorage.getItem("blg-checkout-return")) {
+      sessionStorage.removeItem("blg-checkout-return");
+      setPage("checkout");
+    }
+  }, [user, authIntent]);
   const go = (p: typeof page) => {
     if (pageFromHash(window.location.hash)) {
       history.replaceState(null, "", window.location.pathname + window.location.search);
@@ -261,7 +270,7 @@ export default function App() {
         if (session?.user) {
           setUser(session.user.email ?? null);
           note("Your email has been confirmed. Welcome to BALI & LISA GLAM.");
-          go("account");
+          go(sessionStorage.getItem("blg-checkout-return") ? "checkout" : "account");
         }
       }
     });
@@ -382,12 +391,15 @@ export default function App() {
           />
         )}{" "}
         {page === "product" && active && (
-          <Detail product={active} back={() => go("shop")} add={add} />
+          <Detail bag={cart} product={products.find(p => p.id === active.id) ?? active} back={() => go("shop")} add={add} />
         )}{" "}
         {page === "account" && <Account user={user} setUser={setUser} note={note} add={add} goShop={() => go("shop")} authIntent={authIntent} clearAuthIntent={() => setAuthIntent("normal")} />}{" "}
         {page === "admin" && <AdminGuard user={user} go={go} note={note} />}{" "}
         {page === "checkout" && (
           <Checkout
+            user={user}
+            signIn={requestCheckoutSignIn}
+            stockError={bagStockError(cart, products)}
             cart={cart}
             subtotal={subtotal}
             back={() => go("shop")}
@@ -414,6 +426,8 @@ export default function App() {
       </main>
       <Footer go={go} note={note} />
       <Cart
+        stockError={bagStockError(cart, products)}
+        canIncrement={(id: number) => availableQuantity(id, products.find(p => p.id === id)?.inventory, cart) > 0}
         open={cartOpen}
         close={() => setCartOpen(false)}
         cart={cart}
@@ -422,7 +436,7 @@ export default function App() {
           setCart((c) =>
             c
               .map((x) =>
-                cartLineKey(x) === key
+                cartLineKey(x) === key && (n < 0 || availableQuantity(x.id, products.find(p => p.id === x.id)?.inventory, c) > 0)
                   ? { ...x, quantity: Math.max(0, x.quantity + n) }
                   : x,
               )
@@ -612,7 +626,7 @@ function Card({ p, show, add, note }: any) {
           <Star size={14} fill="currentColor" />
           {p.rating} <small>({p.reviews})</small>
         </span>
-        <button onClick={() => add(p)}>Add to bag</button>
+        <button disabled={p.inventory <= 0} onClick={() => add(p)}>{p.inventory <= 0 ? "Out of stock" : "Add to bag"}</button>
       </div>
     </article>
   );
@@ -850,7 +864,8 @@ function BeautyGuide({ shopLips }: any) {
     </section>
   );
 }
-function Detail({ product, back, add }: any) {
+function Detail({ product, back, add, bag }: any) {
+  const remaining = availableQuantity(product.id, product.inventory, bag);
   const [selected, setSelected] = useState<Record<string, string>>({}),
     [optionError, setOptionError] = useState(""),
     [qty, setQty] = useState(1),
@@ -880,19 +895,22 @@ function Detail({ product, back, add }: any) {
           <p className="desc">{product.description}</p>
           <ProductOptionSelectors groups={product.options ?? []} selected={selected} onChange={value => { setSelected(value); setOptionError(""); }} />
           {optionError && <p role="alert">{optionError}</p>}
+          {product.inventory <= 0 ? <p role="status">Out of stock</p> : remaining === 0 ? <p role="status">All available units are already in your bag.</p> : qty > remaining ? <p role="alert">Stock has changed. Reduce the quantity to {remaining} or fewer.</p> : null}
           <div className="purchase">
             <div className="quantity">
               <button onClick={() => setQty(Math.max(1, qty - 1))}>
                 <Minus size={15} />
               </button>
               {qty}
-              <button onClick={() => setQty(qty + 1)}>
+              <button aria-label="Increase quantity" disabled={qty >= remaining} onClick={() => setQty(Math.min(remaining, qty + 1))}>
                 <Plus size={15} />
               </button>
             </div>
             <button
               className="btn dark"
+              disabled={remaining <= 0 || qty > remaining}
               onClick={() => {
+                if (qty > remaining || remaining <= 0) return;
                 const result = selectProductOptions(product.options ?? [], selected);
                 if (result.error) { setOptionError(result.error); return; }
                 add(product, optionSummary(result.choices), result.choices, qty);
@@ -937,7 +955,7 @@ function Detail({ product, back, add }: any) {
     </section>
   );
 }
-function Cart({ open, close, cart, subtotal, update, remove, checkout }: any) {
+function Cart({ open, close, cart, subtotal, update, remove, checkout, stockError, canIncrement }: any) {
   return (
     <>
       <div className={`overlay ${open ? "show" : ""}`} onClick={close} />
@@ -966,7 +984,7 @@ function Cart({ open, close, cart, subtotal, update, remove, checkout }: any) {
                           <Minus size={13} />
                         </button>
                         {x.quantity}
-                        <button onClick={() => update(cartLineKey(x), 1)}>
+                        <button disabled={!canIncrement(x.id)} onClick={() => update(cartLineKey(x), 1)}>
                           <Plus size={13} />
                         </button>
                       </div>
@@ -985,6 +1003,7 @@ function Cart({ open, close, cart, subtotal, update, remove, checkout }: any) {
                 <b>{money(subtotal)}</b>
               </div>
               <small>Shipping is confirmed at checkout.</small>
+              {stockError && <p role="alert">{stockError}</p>}
               <button className="btn dark" onClick={checkout}>
                 Secure checkout <ArrowRight size={17} />
               </button>
@@ -1007,15 +1026,20 @@ function Cart({ open, close, cart, subtotal, update, remove, checkout }: any) {
     </>
   );
 }
-function Checkout({ cart, subtotal, back }: any) {
+function Checkout({ cart, subtotal, back, user, signIn, stockError }: any) {
   const [step, setStep] = useState(1),
-    [address, setAddress] = useState<Record<string, string>>({ country: "Canada" }),
+    [address, setAddress] = useState<Record<string, string>>(() => readCheckoutDraft(sessionStorage)),
     [method, setMethod] = useState<"manual_whatsapp" | "manual_email">("manual_whatsapp"),
     [settings, setSettings] = useState<any>(null),
     [busy, setBusy] = useState(false),
     [confirmation, setConfirmation] = useState<any>(null),
     [emailNotice, setEmailNotice] = useState(""),
     [error, setError] = useState("");
+  const [needsSignIn, setNeedsSignIn] = useState(false);
+  const [handoff, setHandoff] = useState("");
+  const recoveryLock = useRef(false);
+  const deliveryEdited = useRef(Object.entries(readCheckoutDraft(sessionStorage)).some(([key, value]) => value.trim() && (key !== "country" || value !== "Canada")));
+  useEffect(() => { if (!confirmation) sessionStorage.setItem("blg-checkout-draft", JSON.stringify(address)); }, [address, confirmation]);
   const orderSubmissionStarted = useRef(false);
   const checkoutIdempotencyKey = useRef(
     sessionStorage.getItem("blg-checkout-idempotency-key") ?? crypto.randomUUID(),
@@ -1031,10 +1055,10 @@ function Checkout({ cart, subtotal, back }: any) {
   useEffect(() => {
     void getCustomerAccount()
       .then(({ profile, address: savedAddress }) => {
-        if (!savedAddress) return;
+        if (!savedAddress || deliveryEdited.current) return;
         setAddress((current) => ({
-          ...current,
           ...savedAddress,
+          ...current,
           email: current.email ?? profile?.email ?? "",
           phone: current.phone ?? savedAddress.phone ?? profile?.phone ?? "",
           country: savedAddress.country ?? "Canada",
@@ -1055,6 +1079,62 @@ function Checkout({ cart, subtotal, back }: any) {
       ? 0
       : standardShippingCents / 100
     : null;
+  const prepareHandoff = async (order: any) => {
+    if (recoveryLock.current) return;
+    recoveryLock.current = true;
+    setBusy(true); setError("");
+    try {
+      const orderSummary = await getManualOrderSummary(order.order_id);
+      const formatOrderTotal = (cents: number) => orderMoney(cents, orderSummary.currency);
+      const orderLines = orderSummary.order_items
+        .map((item, index) => {
+          const lineTotal = item.unit_price_cents * item.quantity;
+          return [
+            `${index + 1}. ${item.product_name}`,
+            item.shade ? `   Options: ${item.shade}` : null,
+            `   Quantity: ${item.quantity}`,
+            `   Price: ${formatOrderTotal(item.unit_price_cents)}`,
+            `   Subtotal: ${formatOrderTotal(lineTotal)}`,
+          ]
+            .filter(Boolean)
+            .join("\n");
+        })
+        .join("\n\n");
+      const message = `Hello Bali & Lisa Glam,
+
+My name is ${[address.first_name, address.last_name].filter(Boolean).join(" ")}.
+
+I would like to complete payment for my order.
+
+Order Reference: #${orderSummary.order_number}
+
+ORDER DETAILS
+
+${orderLines}
+
+Shipping: ${formatOrderTotal(orderSummary.shipping_cents)}
+Order Total: ${formatOrderTotal(orderSummary.total_cents)}
+
+DELIVERY
+${address.address}${address.unit ? `, ${address.unit}` : ""}
+${address.city}, ${address.province}
+${address.postal_code?.toUpperCase() || "No postal / ZIP code"}
+${address.country}
+Phone: ${address.phone}
+
+Payment Method: ${order.method === "manual_whatsapp" ? "WhatsApp Manual Payment" : "Email Manual Payment"}
+
+Please send me the payment instructions. I will send my successful payment receipt here after payment.
+
+Thank you.`;
+
+      const contact = paymentContact(settings, order.method);
+      if (!contact) throw new Error("Contact unavailable");
+      setHandoff(paymentHref(contact, order.method, order.order_number, message));
+    } catch {
+      setError("Your order is recorded. We could not load the payment contact details. Retry below, or contact support with your order number. Do not place another order.");
+    } finally { recoveryLock.current = false; setBusy(false); }
+  };
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (step === 1) {
@@ -1095,10 +1175,11 @@ function Checkout({ cart, subtotal, back }: any) {
       setStep(2);
       return;
     }
-    if (!settings) {
-      setError("Payment contact details are not available.");
+    if (!paymentContact(settings, method)) {
+      setError("This payment contact method is unavailable. Choose another method or contact support.");
       return;
     }
+    if (stockError) { setError(stockError); return; }
     if (orderSubmissionStarted.current) return;
     orderSubmissionStarted.current = true;
     setBusy(true);
@@ -1114,71 +1195,20 @@ function Checkout({ cart, subtotal, back }: any) {
         checkoutIdempotencyKey.current,
       );
       orderCreated = true;
-      const orderSummary = await getManualOrderSummary(order.order_id);
       setConfirmation({ ...order, method });
+      sessionStorage.removeItem("blg-checkout-draft");
       void sendOrderEmail(order.order_id, "order_created")
         .then(() => setEmailNotice("We sent an order receipt to your email address."))
         .catch(() => setEmailNotice("Your order is safely recorded, but we could not send the email receipt. You can continue with payment and contact us if you need a copy."));
       sessionStorage.removeItem("blg-checkout-idempotency-key");
       window.dispatchEvent(new Event("blg:checkout-complete"));
-      const formatOrderTotal = (cents: number) => orderMoney(cents, orderSummary.currency);
-      const orderLines = orderSummary.order_items
-        .map((item, index) => {
-          const lineTotal = item.unit_price_cents * item.quantity;
-          return [
-            `${index + 1}. ${item.product_name}`,
-            item.shade ? `   Options: ${item.shade}` : null,
-            `   Quantity: ${item.quantity}`,
-            `   Price: ${formatOrderTotal(item.unit_price_cents)}`,
-            `   Subtotal: ${formatOrderTotal(lineTotal)}`,
-          ]
-            .filter(Boolean)
-            .join("\n");
-        })
-        .join("\n\n");
-      const message = `Hello Bali & Lisa Glam,
-
-My name is ${[address.first_name, address.last_name].filter(Boolean).join(" ")}.
-
-I would like to complete payment for my order.
-
-Order Reference: #${orderSummary.order_number}
-
-ORDER DETAILS
-
-${orderLines}
-
-Shipping: ${formatOrderTotal(orderSummary.shipping_cents)}
-Order Total: ${formatOrderTotal(orderSummary.total_cents)}
-
-DELIVERY
-${address.address}${address.unit ? `, ${address.unit}` : ""}
-${address.city}, ${address.province}
-${address.postal_code?.toUpperCase() || "No postal / ZIP code"}
-${address.country}
-Phone: ${address.phone}
-
-Payment Method: ${method === "manual_whatsapp" ? "WhatsApp Manual Payment" : "Email Manual Payment"}
-
-Please send me the payment instructions. I will send my successful payment receipt here after payment.
-
-Thank you.`;
-      const encodedMessage = encodeURIComponent(message);
-      if (method === "manual_whatsapp" && settings.whatsapp_number) {
-        window.open(
-          `https://wa.me/${String(settings.whatsapp_number).replace(/\D/g, "")}?text=${encodedMessage}`,
-          "_blank",
-          "noopener",
-        );
-      }
-      if (method === "manual_email" && settings.business_email) {
-        window.location.href = `mailto:${settings.business_email}?subject=${encodeURIComponent(`Payment Request - Order #${orderSummary.order_number}`)}&body=${encodedMessage}`;
-      }
+      await prepareHandoff({ ...order, method });
     } catch (error) {
       if (!orderCreated) {
         orderSubmissionStarted.current = false;
         const failure = checkoutFailure(error);
         logCheckoutFailure(failure);
+        if (failure.category === "authentication") setNeedsSignIn(true);
         setError(failure.message);
       } else {
         setError("Your order was created, but we could not open the payment contact link.");
@@ -1199,6 +1229,10 @@ Thank you.`;
           </p>
           <p><b>Total: {orderMoney(confirmation.total_cents, confirmation.currency)}</b></p>
           <p>Payment is requested before {new Date(confirmation.payment_expires_at).toLocaleString("en-CA")}.</p>
+          <p>Opening WhatsApp or email does not complete payment. Request instructions, complete payment and send your receipt. Bali &amp; Lisa Glam verifies payment before confirming it.</p>
+          {error && <p role="alert">{error}</p>}
+          {handoff ? <a className="btn dark" href={handoff} target={confirmation.method === "manual_whatsapp" ? "_blank" : undefined} rel="noopener noreferrer">{confirmation.method === "manual_whatsapp" ? "Open WhatsApp" : "Open Email"}</a> : <button className="btn dark" disabled={busy} onClick={() => void prepareHandoff(confirmation)}>{busy ? "Loading payment details..." : "Retry payment details"}</button>}
+          <p><a href="#/contact" target="_blank" rel="noopener noreferrer">Contact support</a> with Order #{confirmation.order_number} if you need help.</p>
           {emailNotice && <p role="status">{emailNotice}</p>}
           <button className="btn dark" onClick={back}>
             Continue shopping
@@ -1206,13 +1240,14 @@ Thank you.`;
         </div>
       </section>
     );
+  if (!user || needsSignIn) return <section className="checkout"><div className="account-card"><h1>Sign in to checkout</h1>{error && <p role="alert">{error}</p>}<p>An account is required to place your order and track payment. Your bag and delivery draft will be kept in this tab.</p><button className="btn dark" onClick={signIn}>Sign in / Create account</button></div></section>;
   return (
     <section className="checkout">
       <button className="wordmark checkout-logo" onClick={back}>
         BALI & LISA <i>GLAM</i>
       </button>
       <div className="checkout-layout">
-        <form noValidate onSubmit={submit}>
+        <form noValidate onChange={() => { deliveryEdited.current = true; }} onSubmit={submit}>
           <button type="button" className="back" onClick={back}>
             <ArrowLeft size={16} /> Continue shopping
           </button>
@@ -1313,6 +1348,7 @@ Thank you.`;
             </>
           ) : (
             <>
+              <section aria-label="Delivery details"><h2>Delivery details</h2><p>{[address.first_name, address.last_name].filter(Boolean).join(" ")}</p><p>{[address.address, address.unit, address.city, address.province, address.postal_code, address.country].filter(Boolean).join(", ")}</p><p>{address.email} / {address.phone}</p><button type="button" className="text" onClick={() => { setStep(1); setError(""); }}>Edit delivery details</button></section>
               <p>
                 For now, payments are completed directly with Bali & Lisa Glam through WhatsApp or
                 email. After placing your order, contact us using one of the options below. We’ll
@@ -1335,9 +1371,11 @@ Thank you.`;
                 />{" "}
                 Email Payment — request instructions by email
               </label>
+              {!paymentContact(settings, method) && <p role="status">This contact method is currently unavailable. Choose another method or <a href="#/contact" target="_blank" rel="noopener noreferrer">contact support</a>.</p>}
               <p>Credit / Debit Card — Stripe: Coming soon</p>
             </>
           )}
+          {stockError && <p role="alert">{stockError}</p>}
           {step === 2 && <p className="checkout-acknowledgment">By placing your order, you agree to our <a href="#/terms" target="_blank" rel="noopener noreferrer">Terms</a> and acknowledge our <a href="#/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>. Links open in a new tab so you can keep your checkout details.</p>}
           <button type="submit" className="btn dark pay" disabled={busy}>
             {step === 1
