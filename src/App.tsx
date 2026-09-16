@@ -25,6 +25,8 @@ import "./mobile.css";
 import "./product-options.css";
 import { CartButton } from "./CartButton";
 import { ProductOptionsEditor } from "./ProductOptionsEditor";
+import { SupportLinks, SupportPageView } from "./SupportPages";
+import { supportPageFromHash, supportTitles, type SupportPage } from "./lib/support-pages";
 import { ProductOptionSelectors } from "./ProductOptionSelectors";
 import { cartLineKey, cartQuantity, optionSummary, selectProductOptions, validateOptionEditor, type OptionGroup, type OptionSelection } from "./lib/product-options";
 import { supabase } from "./lib/supabase";
@@ -109,8 +111,8 @@ const canadianProvinces = [
 
 export default function App() {
   const [page, setPage] = useState<
-      "home" | "shop" | "story" | "guide" | "product" | "account" | "admin" | "checkout"
-    >("home"),
+      "home" | "shop" | "story" | "guide" | "product" | "account" | "admin" | "checkout" | SupportPage
+    >(() => supportPageFromHash(window.location.hash) ?? "home"),
     [active, setActive] = useState<Product | null>(null),
     [cartOpen, setCartOpen] = useState(false),
     [menu, setMenu] = useState(false),
@@ -127,10 +129,27 @@ export default function App() {
     ),
     [catalogVersion, setCatalogVersion] = useState(0);
   const go = (p: typeof page) => {
+    if (supportPageFromHash(window.location.hash)) {
+      history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
     setPage(p);
     setMenu(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
+  useEffect(() => {
+    const followSupportLink = () => {
+      const target = supportPageFromHash(window.location.hash);
+      if (target) {
+        setPage(target);
+        setMenu(false);
+        window.scrollTo({ top: 0 });
+      } else if (!window.location.hash) {
+        setPage("home");
+      }
+    };
+    window.addEventListener("hashchange", followSupportLink);
+    return () => window.removeEventListener("hashchange", followSupportLink);
+  }, []);
   const note = (s: string) => {
     setToast(s);
     setTimeout(() => setToast(""), 2500);
@@ -249,7 +268,7 @@ export default function App() {
   return (
     <div className="app">
       <div className="announcement">
-        <Sparkles size={14} /> Complimentary shipping on orders over $75 <span>•</span> Join the
+        <Sparkles size={14} /> Shipping rates and offers shown at checkout <span>•</span> Join the
         list for 15% off
       </div>
       <Header
@@ -317,6 +336,7 @@ export default function App() {
         </div>
       )}
       <main>
+        {Object.hasOwn(supportTitles, page) && <SupportPageView key={page} page={page as SupportPage} />}
         {page === "home" && (
           <Home
             shop={() => go("shop")}
@@ -897,8 +917,8 @@ function Detail({ product, back, add }: any) {
       <section className="promise">
         <Package size={22} />
         <div>
-          <b>Free delivery on $75+</b>
-          <span>Complimentary standard shipping and easy 30-day returns.</span>
+          <b>Shipping &amp; returns</b>
+          <span>Shipping rates are shown at checkout. <a href="#/returns">View our Return &amp; Refund Policy.</a></span>
         </div>
         <Heart size={22} />
         <div>
@@ -1310,6 +1330,7 @@ Thank you.`;
               <p>Credit / Debit Card — Stripe: Coming soon</p>
             </>
           )}
+          {step === 2 && <p className="checkout-acknowledgment">By placing your order, you agree to our <a href="#/terms" target="_blank" rel="noopener noreferrer">Terms</a> and acknowledge our <a href="#/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>. Links open in a new tab so you can keep your checkout details.</p>}
           <button type="submit" className="btn dark pay" disabled={busy}>
             {step === 1
               ? "Continue to payment"
@@ -2148,9 +2169,9 @@ function Footer({ go, note }: any) {
       </div>
       <div className="footer-bottom">
         <span>© 2026 BALI & LISA GLAM</span>
-        <span>Privacy · Terms · Accessibility</span>
         <span>@balilisaglam</span>
       </div>
+      <SupportLinks />
     </footer>
   );
 }
