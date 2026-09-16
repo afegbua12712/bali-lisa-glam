@@ -8,7 +8,7 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 export default defineConfig([
   globalIgnores(['dist', 'src/admin', 'src/components', 'src/hooks', 'src/routes', 'src/router.tsx', 'src/lib/config.server.ts', 'src/lib/utils.ts']),
   {
-    files: ['src/SupportPages.tsx', 'src/lib/support-pages.ts', 'src/CartButton.tsx', 'src/ProductOptionSelectors.tsx', 'src/ProductOptionsEditor.tsx', 'src/lib/product-options.ts', 'src/main.tsx', 'src/App.tsx', 'src/lib/supabase.ts', 'src/lib/store.ts', 'src/PaymentConfirmationEmailAction.tsx', 'src/lib/payment-email-state.ts', 'src/lib/order-email.ts', 'src/lib/checkout-errors.ts'],
+    files: ['src/lib/seo.ts', 'src/SupportPages.tsx', 'src/lib/support-pages.ts', 'src/CartButton.tsx', 'src/ProductOptionSelectors.tsx', 'src/ProductOptionsEditor.tsx', 'src/lib/product-options.ts', 'src/main.tsx', 'src/App.tsx', 'src/lib/supabase.ts', 'src/lib/store.ts', 'src/PaymentConfirmationEmailAction.tsx', 'src/lib/payment-email-state.ts', 'src/lib/order-email.ts', 'src/lib/checkout-errors.ts'],
     extends: [js.configs.recommended, tseslint.configs.recommended, reactHooks.configs.flat.recommended, reactRefresh.configs.vite],
     languageOptions: { globals: globals.browser },
     rules: { '@typescript-eslint/no-explicit-any': 'off', 'react-hooks/set-state-in-effect': 'off' },

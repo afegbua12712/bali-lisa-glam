@@ -1,5 +1,3 @@
 User-agent: *
 Allow: /
-Disallow: /cart
-Disallow: /checkout
-Disallow: /wishlist
+Sitemap: https://balilisaglam.com/sitemap.xml

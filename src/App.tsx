@@ -26,7 +26,8 @@ import "./product-options.css";
 import { CartButton } from "./CartButton";
 import { ProductOptionsEditor } from "./ProductOptionsEditor";
 import { SupportLinks, SupportPageView } from "./SupportPages";
-import { supportPageFromHash, supportTitles, type SupportPage } from "./lib/support-pages";
+import { supportTitles, type SupportPage } from "./lib/support-pages";
+import { applyMetadata, metadataFor, pageFromHash, type SeoView } from "./lib/seo";
 import { ProductOptionSelectors } from "./ProductOptionSelectors";
 import { cartLineKey, cartQuantity, optionSummary, selectProductOptions, validateOptionEditor, type OptionGroup, type OptionSelection } from "./lib/product-options";
 import { supabase } from "./lib/supabase";
@@ -110,9 +111,7 @@ const canadianProvinces = [
 ];
 
 export default function App() {
-  const [page, setPage] = useState<
-      "home" | "shop" | "story" | "guide" | "product" | "account" | "admin" | "checkout" | SupportPage
-    >(() => supportPageFromHash(window.location.hash) ?? "home"),
+  const [page, setPage] = useState<SeoView>(() => pageFromHash(window.location.hash) ?? "home"),
     [active, setActive] = useState<Product | null>(null),
     [cartOpen, setCartOpen] = useState(false),
     [menu, setMenu] = useState(false),
@@ -129,7 +128,7 @@ export default function App() {
     ),
     [catalogVersion, setCatalogVersion] = useState(0);
   const go = (p: typeof page) => {
-    if (supportPageFromHash(window.location.hash)) {
+    if (pageFromHash(window.location.hash)) {
       history.replaceState(null, "", window.location.pathname + window.location.search);
     }
     setPage(p);
@@ -138,7 +137,7 @@ export default function App() {
   };
   useEffect(() => {
     const followSupportLink = () => {
-      const target = supportPageFromHash(window.location.hash);
+      const target = pageFromHash(window.location.hash);
       if (target) {
         setPage(target);
         setMenu(false);
@@ -150,6 +149,9 @@ export default function App() {
     window.addEventListener("hashchange", followSupportLink);
     return () => window.removeEventListener("hashchange", followSupportLink);
   }, []);
+  useEffect(() => {
+    applyMetadata(metadataFor(page, active));
+  }, [page, active]);
   const note = (s: string) => {
     setToast(s);
     setTimeout(() => setToast(""), 2500);
@@ -336,6 +338,12 @@ export default function App() {
         </div>
       )}
       <main>
+        {page === "not-found" && <section className="support-page" aria-labelledby="not-found-title">
+          <p className="eyebrow">Bali &amp; Lisa Glam</p>
+          <h1 id="not-found-title">Page not found</h1>
+          <p>This page is not available. Return to the store to continue browsing.</p>
+          <button className="btn" onClick={() => go("home")}>Back to the store</button>
+        </section>}
         {Object.hasOwn(supportTitles, page) && <SupportPageView key={page} page={page as SupportPage} />}
         {page === "home" && (
           <Home
@@ -485,7 +493,7 @@ function Home({ shop, story, show, category, add, note }: any) {
         <div className="hero-image">
           <img
             src="https://images.unsplash.com/photo-1616683693504-3ea7e9ad6fec?auto=format&fit=crop&w=1300&q=90"
-            alt="Woman enjoying BALI & LISA GLAM beauty"
+            alt=""
           />
           <div>
             Your glow
@@ -527,7 +535,7 @@ function Home({ shop, story, show, category, add, note }: any) {
         <div>
           <img
             src="https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1100&q=85"
-            alt="BALI & LISA GLAM muse"
+            alt=""
           />
         </div>
         <div>
@@ -693,7 +701,7 @@ function Story({ shop }: any) {
       <div className="story-hero">
         <img
           src="https://images.unsplash.com/photo-1515377905703-c4788e51af15?auto=format&fit=crop&w=1500&q=85"
-          alt="BALI & LISA GLAM founder portrait"
+          alt=""
         />
       </div>
       <div className="story-manifesto">
@@ -728,7 +736,7 @@ function Story({ shop }: any) {
       <section className="story-close">
         <img
           src="https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=1000&q=85"
-          alt="BALI & LISA GLAM community"
+          alt=""
         />
         <div>
           <p className="eyebrow">THE BALI & LISA WAY</p>
