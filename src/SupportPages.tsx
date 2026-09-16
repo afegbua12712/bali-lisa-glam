@@ -26,8 +26,8 @@ function ContactDetails() {
   if (failed) return <div role="status"><p>We couldn’t load the support contacts. Please try again.</p><button type="button" onClick={() => setAttempt(value => value + 1)}>Reload contact details</button></div>
   if (!links) return <p role="status">Loading contact details…</p>
   return <div className="support-contacts">
-    <section><h2>Email</h2>{links.email ? <a href={links.email.href}>{links.email.label}</a> : <p>Email support is not currently listed. Please use another available channel.</p>}</section>
-    <section><h2>WhatsApp</h2>{links.whatsapp ? <a href={links.whatsapp.href} target="_blank" rel="noopener noreferrer">Message us on WhatsApp · {links.whatsapp.label}</a> : <p>WhatsApp support is not currently listed. Please use another available channel.</p>}</section>
+    <section><h2>Email</h2>{links.email ? <><p>Get help with your order or send a privacy request.</p><a className="support-contact-action" href={links.email.href}>Contact us via Email</a></> : <p>Email support is not currently listed. Please use another available channel.</p>}</section>
+    <section><h2>WhatsApp</h2>{links.whatsapp ? <><p>Start a conversation with our team about your order.</p><a className="support-contact-action" href={links.whatsapp.href} target="_blank" rel="noopener noreferrer">Chat with us on WhatsApp<span className="sr-only"> (opens in a new tab)</span></a></> : <p>WhatsApp support is not currently listed. Please use another available channel.</p>}</section>
     {!links.email && !links.whatsapp && <p role="status">Support contacts are temporarily unavailable. If you already have an order email, you can use its support contact details.</p>}
   </div>
 }

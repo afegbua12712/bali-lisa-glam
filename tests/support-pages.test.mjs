@@ -35,6 +35,31 @@ test('contact links use supplied settings and reject unsafe or malformed destina
   assert.equal(content.contactLinks({ business_email: 'help@example.test\nBcc:bad@example.test' }).email, null)
   assert.equal(content.contactLinks({ whatsapp_number: 'javascript:1234567890' }).whatsapp, null)
 })
+
+test('contact actions hide raw values while preserving destinations and unavailable states', () => {
+  function renderContacts(settings) {
+    let state = 0
+    const loadedViews = compile('SupportPages.tsx', {
+      './lib/support-pages': content, './lib/supabase': { supabase: {} }, './support-pages.css': {},
+      react: { ...require('react'), useEffect() {}, useState: () => [[content.contactLinks(settings), false, 0][state++], () => {}] },
+    })
+    return renderToStaticMarkup(createElement(loadedViews.SupportPageView, { page: 'contact' }))
+  }
+  const html = renderContacts({ business_email: 'help@example.test', whatsapp_number: '+1 (416) 555-0100' })
+  const text = html.replace(/<[^>]*>/g, '')
+  assert.ok(text.includes('Contact us via Email'))
+  assert.ok(text.includes('Chat with us on WhatsApp'))
+  assert.ok(!text.includes('help@example.test'))
+  assert.ok(!text.includes('416'))
+  assert.ok(html.includes('href="mailto:help%40example.test"'))
+  assert.ok(html.includes('href="https://wa.me/14165550100" target="_blank" rel="noopener noreferrer"'))
+  assert.ok(text.includes('opens in a new tab'))
+  const unavailable = renderContacts({ business_email: 'invalid', whatsapp_number: 'invalid' })
+  assert.ok(unavailable.includes('Email support is not currently listed'))
+  assert.ok(unavailable.includes('WhatsApp support is not currently listed'))
+  assert.ok(unavailable.includes('Support contacts are temporarily unavailable'))
+  assert.ok(!unavailable.includes('support-contact-action'))
+})
 test('FAQ covers payment and orders, and customer rights are preserved without invented deadlines', () => {
   assert.equal(content.supportContent.faq.length, 10)
   assert.ok(content.supportContent.returns.some(([, text]) => text.includes('applicable consumer law')))
