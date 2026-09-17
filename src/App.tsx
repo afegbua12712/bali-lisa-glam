@@ -4,7 +4,6 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
-  ChevronDown,
   Heart,
   Menu,
   Minus,
@@ -279,8 +278,7 @@ export default function App() {
   return (
     <div className="app">
       <div className="announcement">
-        <Sparkles size={14} /> Shipping rates and offers shown at checkout <span>•</span> Join the
-        list for 15% off
+        <Sparkles size={14} /> Shipping rates and offers shown at checkout
       </div>
       <Header
         count={cartQuantity(cart)}
@@ -424,7 +422,7 @@ export default function App() {
           />
         )}
       </main>
-      <Footer go={go} note={note} />
+      <Footer go={go} />
       <Cart
         stockError={bagStockError(cart, products)}
         canIncrement={(id: number) => availableQuantity(id, products.find(p => p.id === id)?.inventory, cart) > 0}
@@ -463,11 +461,11 @@ export default function App() {
 function Header({ count, page, isAdmin, go, cart, menu, search }: any) {
   return (
     <header className="header">
-      <button className="icon mobile" onClick={menu}>
+      <button className="icon mobile" aria-label="Open menu" onClick={menu}>
         <Menu />
       </button>
-      <button className="wordmark" onClick={() => go("home")}>
-        BALI & LISA <i>GLAM</i>
+      <button className="wordmark brand-logo" aria-label="Bali & Lisa Glam home" onClick={() => go("home")}>
+        <img src="/bali-lisa-logo.png" alt="Bali & Lisa Glam" />
       </button>
       <nav>
         <button className={page === "shop" || page === "product" ? "active" : ""} onClick={() => go("shop")}>Shop</button>
@@ -516,15 +514,6 @@ function Home({ shop, story, show, category, add, note }: any) {
           </div>
         </div>
       </section>
-      <section className="trust">
-        <span>Vegan formulas</span>
-        <b>✦</b>
-        <span>Thoughtfully made</span>
-        <b>✦</b>
-        <span>Always cruelty-free</span>
-        <b>✦</b>
-        <span>For every shade of you</span>
-      </section>
       <section className="section">
         <Head eyebrow="SHOP BY MOOD" title="A ritual for every version of you." action={shop} />
         <div className="category-grid">
@@ -565,21 +554,6 @@ function Home({ shop, story, show, category, add, note }: any) {
             Discover our world <ArrowRight size={16} />
           </button>
         </div>
-      </section>
-      <section className="newsletter">
-        <Sparkles size={22} />
-        <p className="eyebrow">THE GLOW LIST</p>
-        <h2>Good things are coming.</h2>
-        <p>First looks, little luxuries, and 15% off your first ritual.</p>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            note("You are on the Glow List — welcome in.");
-          }}
-        >
-          <input aria-label="Email" required type="email" placeholder="Your email address" />
-          <button className="btn dark">Sign me up</button>
-        </form>
       </section>
     </>
   );
@@ -656,7 +630,7 @@ function Shop({ items, category, setCategory, sort, setSort, query, setQuery, sh
         </div>
         <div className="sort">
           <SlidersHorizontal size={17} />
-          <select value={sort} onChange={(e) => setSort(e.target.value)}>
+          <select aria-label="Sort products" value={sort} onChange={(e) => setSort(e.target.value)}>
             <option>Featured</option>
             <option>Top rated</option>
             <option>Price: low to high</option>
@@ -671,6 +645,7 @@ function Shop({ items, category, setCategory, sort, setSort, query, setQuery, sh
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            aria-label="Search collection"
             placeholder="Search collection"
           />
         </div>
@@ -868,8 +843,7 @@ function Detail({ product, back, add, bag }: any) {
   const remaining = availableQuantity(product.id, product.inventory, bag);
   const [selected, setSelected] = useState<Record<string, string>>({}),
     [optionError, setOptionError] = useState(""),
-    [qty, setQty] = useState(1),
-    [tab, setTab] = useState("Details");
+    [qty, setQty] = useState(1);
   useEffect(() => {
     setSelected({});
     setOptionError("");
@@ -919,25 +893,6 @@ function Detail({ product, back, add, bag }: any) {
               Add to bag — {money(product.price * qty)}
             </button>
           </div>
-          <div className="accord">
-            {["Details", "How to use", "Ingredients"].map((x) => (
-              <div key={x}>
-                <button onClick={() => setTab(tab === x ? "" : x)}>
-                  {x}
-                  <ChevronDown size={18} />
-                </button>
-                {tab === x && (
-                  <p>
-                    {x === "Details"
-                      ? product.description
-                      : x === "How to use"
-                        ? "Apply with fingertips, brush, or your favourite ritual tool. Build to your desired finish."
-                        : "Vegan, cruelty-free, and made with skin-kind ingredients without compromise."}
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
         </div>
       </div>
       <section className="promise">
@@ -945,11 +900,6 @@ function Detail({ product, back, add, bag }: any) {
         <div>
           <b>Shipping &amp; returns</b>
           <span>Shipping rates are shown at checkout. <a href="#/returns">View our Return &amp; Refund Policy.</a></span>
-        </div>
-        <Heart size={22} />
-        <div>
-          <b>Made with care</b>
-          <span>Vegan, cruelty-free and consciously crafted.</span>
         </div>
       </section>
     </section>
@@ -2172,11 +2122,7 @@ function AdminSettings({ settings, setSettings, save }: any) {
     </form>
   );
 }
-function Footer({ go, note }: any) {
-  const subscribe = (e: FormEvent) => {
-    e.preventDefault();
-    note("You are on the Glow List — welcome in.");
-  };
+function Footer({ go }: any) {
   return (
     <footer>
       <div className="footer-top">
@@ -2203,14 +2149,10 @@ function Footer({ go, note }: any) {
           <button onClick={() => go("account")}>My account</button>
         </div>
         <div>
-          <h4>Stay in the know</h4>
-          <p>Beauty notes in your inbox. No noise, only glow.</p>
-          <form className="footer-email" onSubmit={subscribe}>
-            <input required type="email" placeholder="Email address" />
-            <button aria-label="Subscribe">
-              <ArrowRight size={17} />
-            </button>
-          </form>
+          <h4>Customer support</h4>
+          <p>Questions about your order or choosing a product?</p>
+          <a href="#/contact">Contact / Support</a>
+          <p><a href="#/faq">Read our FAQ</a></p>
         </div>
       </div>
       <div className="footer-bottom">

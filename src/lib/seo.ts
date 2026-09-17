@@ -61,6 +61,7 @@ export function applyMetadata(metadata: ReturnType<typeof metadataFor>, doc: Doc
   meta('property', 'og:description', metadata.description)
   meta('property', 'og:url', SITE_URL)
   meta('property', 'og:image', SOCIAL_IMAGE_URL)
+  meta('property', 'og:image:secure_url', SOCIAL_IMAGE_URL)
   meta('property', 'og:image:type', 'image/png')
   meta('property', 'og:image:width', '1774')
   meta('property', 'og:image:height', '887')

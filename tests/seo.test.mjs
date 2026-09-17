@@ -60,6 +60,7 @@ test('metadata updates existing elements, creates missing elements and treats pr
     seo.applyMetadata(seo.metadataFor(view), doc)
     assert.equal(elements.length, count)
     assert.equal(doc.head.querySelector('meta[property="og:image"]').attributes.content, seo.SOCIAL_IMAGE_URL)
+    assert.equal(doc.head.querySelector('meta[property="og:image:secure_url"]').attributes.content, seo.SOCIAL_IMAGE_URL)
     assert.equal(doc.head.querySelector('meta[name="twitter:image"]').attributes.content, seo.SOCIAL_IMAGE_URL)
     assert.equal(doc.head.querySelector('meta[name="twitter:card"]').attributes.content, 'summary_large_image')
   }
@@ -76,6 +77,7 @@ test('static defaults match home metadata, structured data is minimal and sitema
   assert.deepEqual(schema, { '@context': 'https://schema.org', '@type': 'WebSite', name: seo.SITE_NAME, url: seo.SITE_URL })
   assert.ok(html.includes('type="image/png" sizes="1254x1254" href="/bali-lisa-favicon.png"'))
   assert.ok(html.includes(`property="og:image" content="${seo.SOCIAL_IMAGE_URL}"`))
+  assert.ok(html.includes(`property="og:image:secure_url" content="${seo.SOCIAL_IMAGE_URL}"`))
   assert.ok(html.includes(`name="twitter:image" content="${seo.SOCIAL_IMAGE_URL}"`))
   assert.ok(html.includes('name="twitter:card" content="summary_large_image"'))
   assert.ok(!html.includes('vercel.app'))
