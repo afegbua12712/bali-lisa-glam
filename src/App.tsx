@@ -23,6 +23,8 @@ import "./App.css";
 import "./readability.css";
 import "./mobile.css";
 import "./product-options.css";
+import "./appearance.css";
+import { AppearanceControl } from "./AppearanceControl";
 import { CartButton } from "./CartButton";
 import { ProductOptionsEditor } from "./ProductOptionsEditor";
 import { SupportLinks, SupportPageView } from "./SupportPages";
@@ -295,6 +297,7 @@ export default function App() {
         <button className="mobile-menu-scrim" aria-label="Close navigation menu" onClick={() => setMenu(false)} />
         <div className="mobile-menu" role="dialog" aria-modal="true" aria-label="Mobile navigation">
           <div className="mobile-menu-head"><span>BALI & LISA <i>GLAM</i></span><button type="button" aria-label="Close navigation menu" onClick={() => setMenu(false)}><X size={21} /></button></div>
+          <AppearanceControl />
           {["Shop all", "Complexion", "Lips", "Eyes", "Skincare", "Our story", "Beauty guide", "Account", ...(isAdmin ? ["Studio"] : [])].map((x) => (
             <button
               key={x}
@@ -475,6 +478,7 @@ function Header({ count, page, isAdmin, go, cart, menu, search }: any) {
         {isAdmin && <button className={page === "admin" ? "active" : ""} data-page="admin" onClick={() => go("admin")}>Studio</button>}
       </nav>
       <div className="actions">
+        <AppearanceControl className="appearance-desktop" />
         <button className="icon" aria-label="Search" onClick={search}>
           <Search size={21} />
         </button>

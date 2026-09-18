@@ -12,7 +12,7 @@ function renderFunction(name, next, props) {
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText
   const icons = require('lucide-react')
   const support = () => createElement('nav', null, 'Support links')
-  const component = new Function('exports', 'require', ...Object.keys(icons), 'CartButton', 'SupportLinks', `${compiled}; return ${name}`)({}, require, ...Object.values(icons), () => createElement('button', null, 'Bag'), support)
+  const component = new Function('exports', 'require', ...Object.keys(icons), 'CartButton', 'SupportLinks', 'AppearanceControl', `${compiled}; return ${name}`)({}, require, ...Object.values(icons), () => createElement('button', null, 'Bag'), support, () => createElement('label', null, 'Appearance'))
   return renderToStaticMarkup(createElement(component, props))
 }
 test('header renders approved logo as an accessible home button, retaining navigation', () => {

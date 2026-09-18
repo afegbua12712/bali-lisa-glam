@@ -1,0 +1,89 @@
+/* Shared warm dark palette; original colours remain the light-mode fallbacks.
+   Token names identify the legacy colour so all existing surfaces share one mapping. */
+html[data-theme="dark"] {
+  --tone-777: #bdb0b6;
+  --tone-493632: #ead0d9;
+  --tone-746963: #cbbbc1;
+  --tone-815515: #f3cd8f;
+  --tone-fff: #282023;
+  --tone-faf8f6: #30262a;
+  --tone-f8f7f5: #30262a;
+  --tone-f7f7f6: #30262a;
+  --tone-fcfaf7: #1c1719;
+  --tone-f5e8e2: #38282e;
+  --tone-ded6d0: #645157;
+  --tone-241d1c: #f5e9ed;
+  --tone-a95943: #e6a995;
+  --tone-fffaf6: #faedf1;
+  --tone-e7cfbf: #3f2d33;
+  --tone-4f403b: #ddcbd2;
+  --tone-f9f3ee: #302329;
+  --tone-f5f2ef: #30262a;
+  --tone-fbf9f6: #241d20;
+  --tone-d9b9a4: #4c353e;
+  --tone-573e34: #e2c4ba;
+  --tone-f2eeeb: #30262a;
+  --tone-ad651f: #edbc7d;
+  --tone-b66c22: #edbc7d;
+  --tone-c95555: #f5a7a7;
+  --tone-fff3f1: #42272e;
+  --tone-8d2929: #ffc0bb;
+  --tone-c5b1a8: #d8c1b8;
+  --tone-88766e: #cbb9b2;
+  --tone-b8a79e: #d6c4bd;
+  --tone-ad958b: #cbb7af;
+  --tone-cfbfba: #68545d;
+  --tone-3c8b63: #9dd5b5;
+  --tone-4da877: #9dd5b5;
+  --tone-c87f66: #e6a995;
+  --tone-fff2dc: #3e3021;
+  --tone-e6f5eb: #20392e;
+  --tone-22613a: #a4e2ba;
+  --tone-fae7e6: #42272e;
+  --tone-982f2a: #ffb6b1;
+  --tone-cdbeb6: #68545d;
+  --tone-a13b36: #ffb6b1;
+  --tone-7b211d: #ffc8c3;
+  --tone-f1ece8: #30262a;
+  --tone-6d5a52: #d8c1b8;
+  --tone-f4e7e0: #38282e;
+  --tone-e1cfc5: #68545d;
+  --tone-fdf9f6: #241d20;
+  --tone-d7a28f: #e8b39f;
+  --tone-e2d1c8: #68545d;
+  --tone-ead3c6: #38282e;
+  --tone-caa996: #bda298;
+  --tone-f6ede8: #38282e;
+  --tone-763c37: #efb5ad;
+  --tone-a79a91: #bdaeb5;
+  --tone-f4e5dd: #38282e;
+  background:#1c1719;color:#f5e9ed;
+  color-scheme:dark;
+}
+.appearance-control {display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;min-width:0;color:var(--ink);margin:0;letter-spacing:0;text-transform:none}
+.appearance-control select {width:auto;max-width:100%;min-height:40px;margin:0;padding:8px 24px 8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--cream);color:var(--ink);font:inherit;cursor:pointer}
+.appearance-control svg {flex-shrink:0}
+.appearance-control select:focus-visible {outline:2px solid var(--clay);outline-offset:3px}
+.appearance-control select:hover {border-color:var(--clay)}
+.header .appearance-control>span {position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+.mobile-menu .appearance-control {flex-wrap:wrap;gap:8px;padding:12px 0;border-bottom:1px solid var(--line)}
+.mobile-menu .appearance-control select {flex:1;font-size:16px;min-height:44px}
+@media(max-width:800px){.header .appearance-desktop{display:none}}
+@media(min-width:801px) and (max-width:1200px){.header nav{gap:12px;margin-left:12px}.header .actions{gap:4px}.appearance-control{gap:4px}}
+html[data-theme="dark"] .header {background:rgba(28,23,25,.97)}
+html[data-theme="dark"] .wishlist-toggle {background:#30262a;color:#f5e9ed}
+html[data-theme="dark"] :is(.stat,.inventory,.admin-bottom>div,.search-bar) {background:#282023}
+html[data-theme="dark"] :is(select,textarea) {background-color:#282023}
+html[data-theme="dark"] .header .bag .cart-count {color:#241d20}
+html[data-theme="dark"] :is(input,select,textarea) {color:var(--ink);color-scheme:dark}
+html[data-theme="dark"] :is(input,textarea)::placeholder {color:#bfb0b6;opacity:1}
+html[data-theme="dark"] :is(button,a,input,select,textarea,summary):focus-visible {outline:2px solid #f0bba7;outline-offset:3px}
+html[data-theme="dark"] :is(button,input,select,textarea):disabled {opacity:.6;cursor:not-allowed}
+html[data-theme="dark"] :is(.btn.dark,.auth-tabs button.active,.pills .selected,.order-view-tabs .selected,.customer-account>nav button.active,.support-contact-action) {color:#241d20}
+html[data-theme="dark"] .btn.dark:hover {background:#e6bdcb;color:#241d20}
+html[data-theme="dark"] .avatar {color:#241d20}
+html[data-theme="dark"] :is(.toast,.admin-nav>.selected) {color:#fff3f6}
+html[data-theme="dark"] .gallery span {color:#fff;text-shadow:0 1px 4px #000}
+/* Keep approved artwork unchanged on a light backing. No image filters. */
+html[data-theme="dark"] .brand-logo {background:#fcfaf7;border-radius:4px}
+html[data-theme="dark"] .support-contact-action:hover {color:#241d20}

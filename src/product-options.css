@@ -1,12 +1,12 @@
 .header .bag .cart-icon { display: inline-flex; position: relative; width: 21px; height: 21px; flex: 0 0 21px; }
-.header .bag .cart-count { display: grid; place-items: center; position: absolute; top: -9px; right: -10px; min-width: 18px; height: 18px; padding: 0 3px; border-radius: 20px; background: #763c37; color: white; font: 700 10px/1 sans-serif; }
+.header .bag .cart-count { display: grid; place-items: center; position: absolute; top: -9px; right: -10px; min-width: 18px; height: 18px; padding: 0 3px; border-radius: 20px; background: var(--tone-763c37, #763c37); color: white; font: 700 10px/1 sans-serif; }
 .product-option-selectors fieldset, .product-options-editor fieldset { min-width: 0; margin: 16px 0; padding: 12px; border: 1px solid var(--line); }
 .product-option-selectors legend { font-weight: 600; overflow-wrap: anywhere; }
 .option-values, .option-editor-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.option-values button { display: inline-flex; align-items: center; gap: 8px; border: 1px solid #a79a91; border-radius: 5px; padding: 10px 12px; min-height: 44px; max-width: 100%; overflow-wrap: anywhere; text-align: left; }
-.option-values button[aria-pressed=true] { border: 2px solid #763c37; background: #f4e5dd; padding: 9px 11px; font-weight: 700; }
-.option-values button:focus-visible, .product-options-editor button:focus-visible { outline: 3px solid #763c37; outline-offset: 3px; }
-.option-swatch { width: 20px; height: 20px; flex: 0 0 20px; border: 1px solid #777; border-radius: 50%; }
+.option-values button { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--tone-a79a91, #a79a91); border-radius: 5px; padding: 10px 12px; min-height: 44px; max-width: 100%; overflow-wrap: anywhere; text-align: left; }
+.option-values button[aria-pressed=true] { border: 2px solid var(--tone-763c37, #763c37); background: var(--tone-f4e5dd, #f4e5dd); padding: 9px 11px; font-weight: 700; }
+.option-values button:focus-visible, .product-options-editor button:focus-visible { outline: 3px solid var(--tone-763c37, #763c37); outline-offset: 3px; }
+.option-swatch { width: 20px; height: 20px; flex: 0 0 20px; border: 1px solid var(--tone-777, #777); border-radius: 50%; }
 .product-options-editor { min-width: 0; grid-column: 1 / -1; }
 .product-options-editor p { font-size: 14px; line-height: 1.5; }
 .product-options-editor input { width: 100%; min-width: 0; }
