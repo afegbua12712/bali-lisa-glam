@@ -43,6 +43,22 @@ test('product option SQL contract in isolated PostgreSQL', async t => {
   await db.exec(read('20260911190000_product_options.sql'))
   const safe = read('20260903120000_safe_order_contract.sql')
   await db.exec(safe.slice(safe.indexOf('create or replace function public.create_manual_order('), safe.indexOf('create or replace function public.confirm_manual_payment(')))
+  // Reproduce the live broad grants, then apply only to this ephemeral database.
+  const legacy = read('20260901130000_manual_payment.sql')
+  await db.exec(legacy.slice(legacy.indexOf('create or replace function public.create_manual_order('), legacy.indexOf('create or replace function public.confirm_manual_payment(')))
+  await db.exec(`alter table public.profiles add column phone text;
+    alter table public.profiles enable row level security;
+    grant select, update on public.profiles to anon, authenticated;
+    grant update(role) on public.profiles to authenticated;
+    grant all on public.profiles to service_role;
+    grant execute on function public.create_order(jsonb,jsonb) to anon, authenticated, service_role;
+    grant execute on function public.create_manual_order(jsonb,jsonb,text) to anon, authenticated;
+    grant execute on function public.create_manual_order(jsonb,jsonb,text,uuid) to anon, authenticated;`)
+  const policies = base.split('\n').filter(line => line.startsWith('create policy') && line.includes('on public.profiles')).join('\n')
+  await db.exec(policies)
+  const hardening = read('20260918120000_checkout_authorization_boundary.sql')
+  await db.exec(hardening)
+  await db.exec(hardening) // Safe reapplication must retain the same privileges.
   const user = async (id, role = 'authenticated') => {
     await db.exec('reset role')
     await db.query("select set_config('test.user_id', $1, false)", [id])
@@ -55,6 +71,34 @@ test('product option SQL contract in isolated PostgreSQL', async t => {
   size.display_order = 1
   const selections = [shade, size].map(g => ({ group_id: g.id, value_id: g.values[0].id, name: 'Forged', value: 'Forged' }))
   let id, created, snapshot
+  await t.test('authorization boundary preserves profile editing and blocks browser role/helper access', async () => {
+    for (const role of ['anon', 'authenticated']) {
+      const [privileges] = await inspect(`select
+        has_column_privilege('${role}', 'profiles', 'role', 'UPDATE') as role_update,
+        has_function_privilege('${role}', 'create_order(jsonb,jsonb)', 'EXECUTE') as helper,
+        has_function_privilege('${role}', 'create_manual_order(jsonb,jsonb,text)', 'EXECUTE') as legacy,
+        has_function_privilege('${role}', 'create_manual_order(jsonb,jsonb,text,uuid)', 'EXECUTE') as checkout`)
+      assert.deepEqual(privileges, { role_update: false, helper: false, legacy: false, checkout: role === 'authenticated' })
+      await user(role === 'anon' ? '' : customer, role)
+      await assert.rejects(db.query("select create_order('[]','{}')"), /permission denied/)
+      await assert.rejects(db.query("select create_manual_order('[]','{}','manual_email')"), /permission denied/)
+    }
+    await user(customer)
+    await db.query("update profiles set first_name='Fixture', last_name='Customer', phone='test', updated_at=now() where id=$1", [customer])
+    await assert.rejects(db.query("update profiles set role='admin' where id=$1", [customer]), /permission denied/)
+    await assert.rejects(db.query("update profiles set role='customer' where id=$1", [admin]), /permission denied/)
+    await assert.rejects(db.query('update profiles set id=$1 where id=$2', [admin, customer]), /permission denied/)
+    assert.equal((await db.query("update profiles set first_name='Wrong' where id=$1 returning id", [admin])).rows.length, 0)
+    assert.equal((await db.query('select is_admin() as admin')).rows[0].admin, false)
+    const [profile] = await inspect(`select first_name, role from profiles where id='${customer}'`)
+    assert.deepEqual(profile, { first_name: 'Fixture', role: 'customer' })
+    // Trusted owner maintenance still works; browser admin checks below remain real.
+    await db.query("update profiles set role='admin' where id=$1", [customer])
+    await db.query("update profiles set role='customer' where id=$1", [customer])
+    const source = readFileSync(new URL('../src/lib/manual-payment.ts', import.meta.url), 'utf8')
+    assert.match(source, /rpc\('create_manual_order'/)
+    assert.match(source, /idempotency_key: idempotencyKey/)
+  })
   await t.test('legacy backfill and historical rows preserved', async () => {
     assert.equal((await inspect('select * from product_option_groups')).length, 1)
     assert.equal((await inspect('select * from product_option_values')).length, 2)
@@ -108,7 +152,7 @@ test('product option SQL contract in isolated PostgreSQL', async t => {
   await t.test('stock is checked across all option combinations, and unavailable products remain blocked', async () => {
     await user(customer)
     const lines = [{ product_id: id, quantity: 10, selected_options: selections }, { product_id: id, quantity: 10, selected_options: selections.slice(0, 1) }]
-    await assert.rejects(db.query("select create_order($1::jsonb, '{\"country\":\"Canada\"}')", [JSON.stringify(lines)]), /Insufficient inventory/)
+    await assert.rejects(db.query("select * from create_manual_order($1::jsonb, '{\"country\":\"Canada\"}', 'manual_email', $2::uuid)", [JSON.stringify(lines), randomUUID()]), /Insufficient inventory/)
     assert.equal((await inspect(`select inventory_quantity from products where id=${id}`))[0].inventory_quantity, 18)
     await db.query('update products set is_active=false where id=$1', [id])
     await user('', 'anon')
