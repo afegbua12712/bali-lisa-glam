@@ -1,4 +1,4 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.112.4'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -220,7 +220,9 @@ Deno.serve(async (request) => {
     return Response.json({ sent: true, status: 'sent' }, { headers: corsHeaders })
   } catch (error) {
     diagnostic(`${stage}_exception`, 502)
-    const message = error instanceof Error ? error.message : 'Transactional email failed'
+    const rawMessage = error instanceof Error ? error.message : ''
+    const knownMessages = ['Authoritative order data is unavailable', 'Order payment is not confirmed', 'Stored order email is unavailable', 'Email was accepted but its delivery record could not be updated']
+    const message = knownMessages.includes(rawMessage) || /^Email provider returned HTTP [45][0-9]{2}$/.test(rawMessage) ? rawMessage : 'Transactional email failed'
     if (notificationId) {
       await serviceClient.from('order_notifications').update({
         status: 'failed', last_error: message.slice(0, 500), updated_at: new Date().toISOString(),

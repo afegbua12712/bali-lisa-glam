@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { readSavedCart, logOperationFailure, productDeletionMessage, expiredReservation } from "./lib/reliability";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
   ArrowLeft,
@@ -125,7 +126,7 @@ export default function App() {
     [isAdmin, setIsAdmin] = useState(false),
     [authIntent, setAuthIntent] = useState<"normal" | "recovery">("normal"),
     [cart, setCart] = useState<CartLine[]>(() =>
-      JSON.parse(sessionStorage.getItem("blg-cart") ?? "[]"),
+      readSavedCart({ getItem: key => sessionStorage.getItem(key) }),
     ),
     [catalogVersion, setCatalogVersion] = useState(0);
   const requestCheckoutSignIn = () => { sessionStorage.setItem("blg-checkout-return", "true"); setUser(null); go("account"); };
@@ -227,7 +228,7 @@ export default function App() {
     };
   }, []);
   useEffect(() => {
-    sessionStorage.setItem("blg-cart", JSON.stringify(cart));
+    try { sessionStorage.setItem("blg-cart", JSON.stringify(cart)); } catch { /* Keep in-memory shopping usable when storage is unavailable. */ }
   }, [cart]);
   useEffect(() => {
     const clearCart = () => setCart([]);
@@ -1453,12 +1454,17 @@ function CustomerDashboard({ setUser, note, add, goShop }: any) {
   const [busy, setBusy] = useState(false);
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
-  const load = async () => {
+  const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const load = useCallback(async () => {
+    setLoading(true); setLoadFailed(false);
     try { setData(await getCustomerAccount()); }
-    catch { note("Your account data could not be loaded."); }
-  };
-  useEffect(() => { void load(); }, []);
-  if (!data) return <section className="account-page"><p>Loading your account…</p></section>;
+    catch { setLoadFailed(true); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+  if (loading) return <section className="account-page"><p role="status">Loading your account...</p></section>;
+  if (loadFailed || !data) return <section className="account-page"><div className="account-card"><h2>Account temporarily unavailable</h2><p role="alert">We could not load your account. Please check your connection and try again.</p><button type="button" className="btn dark" onClick={() => void load()}>Retry</button></div></section>;
   const profile = data.profile ?? {};
   const orders = data.orders ?? [];
   const address = data.address ?? {};
@@ -1595,7 +1601,7 @@ function Admin({ note }: any) {
       window.dispatchEvent(new Event("blg:catalog-updated"));
       note("Product saved.");
     } catch (saveError: any) {
-      console.error("Studio product save failed:", saveError);
+      logOperationFailure("Studio product save failed:", saveError);
       const message = saveError?.code === "23505"
         ? "A product with this slug already exists. Choose a unique slug."
         : "We couldn't save this product. Please review the details and try again.";
@@ -1709,7 +1715,7 @@ function Admin({ note }: any) {
                 await load();
                 note("Product restored to the store.");
               } catch (restoreError) {
-                console.error("Studio product restore failed:", restoreError);
+                logOperationFailure("Studio product restore failed:", restoreError);
                 note("Product could not be restored.");
               }
             }}
@@ -1720,8 +1726,8 @@ function Admin({ note }: any) {
                   await load();
                   note("Product permanently deleted.");
                 } catch (deleteError) {
-                  console.error("Studio product deletion failed:", deleteError);
-                  note("Product could not be deleted.");
+                  logOperationFailure("Studio product deletion failed:", deleteError);
+                  note(productDeletionMessage(deleteError));
                 }
               }
             }}
@@ -1981,6 +1987,19 @@ const orderStatusLabel = (status?: string | null) =>
   ] ?? "Pending";
 
 function AdminOrders({ orders, refresh, refreshEmails, note }: any) {
+  const [now, setNow] = useState(Date.now);
+  const [releasing, setReleasing] = useState<string | null>(null);
+  const releaseLock = useRef(false);
+  const [releaseError, setReleaseError] = useState<string | null>(null);
+  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 60000); return () => window.clearInterval(timer); }, []);
+  const releaseReservation = async (order: any) => {
+    if (releaseLock.current) return;
+    if (!confirm(`Cancel Order #${order.order_number} and restore its reserved inventory? Verify that no payment has been received first.`)) return;
+    releaseLock.current = true; setReleasing(order.id); setReleaseError(null);
+    try { await cancelUnpaidOrder(order.id); await refresh(); note("Unpaid order cancelled and inventory restored."); }
+    catch (error) { logOperationFailure("reservation_release", error); setReleaseError("The order could not be cancelled or refreshed. Refresh orders to check its current state before trying again."); }
+    finally { releaseLock.current = false; setReleasing(null); }
+  };
   const [view, setView] = useState<"active" | "archived">("active");
   const [search, setSearch] = useState("");
   const [paymentFilter, setPaymentFilter] = useState("all");
@@ -2017,11 +2036,12 @@ function AdminOrders({ orders, refresh, refreshEmails, note }: any) {
     try {
       if (action === "delete") await deleteOrders(selected); else await archiveOrders(selected);
       setSelected([]); await refresh(); note(action === "delete" ? "Selected orders permanently deleted." : "Selected orders archived.");
-    } catch (error) { console.error("Studio bulk order action failed:", error); note("The selected orders could not be updated."); }
+    } catch (error) { logOperationFailure("Studio bulk order action failed:", error); note("The selected orders could not be updated."); }
     finally { setBusy(false); }
   };
   const toggleSelected = (id: string) => setSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   return <section className="inventory orders-list">
+    {releaseError && <p role="alert">{releaseError}</p>}
     <div className="order-controls">
       <div className="order-view-tabs"><button className={view === "active" ? "selected" : ""} onClick={() => { setView("active"); setSelected([]); }}>Active orders</button><button className={view === "archived" ? "selected" : ""} onClick={() => { setView("archived"); setSelected([]); }}>Archived orders</button></div>
       <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search order number or customer" />
@@ -2038,20 +2058,21 @@ function AdminOrders({ orders, refresh, refreshEmails, note }: any) {
       const paymentEmail = o.order_notifications?.find((item: any) => item.event_type === "payment_confirmed");
       const retryEmail = async (eventType: "order_created" | "payment_confirmed") => {
         try { await sendOrderEmail(o.id, eventType); await refresh(); note("Transactional email sent."); }
-        catch (emailError) { console.error("Transactional email retry failed:", emailError); await refresh(); note("The email could not be sent. The order itself is unchanged."); }
+        catch (emailError) { logOperationFailure("Transactional email retry failed:", emailError); await refresh(); note("The email could not be sent. The order itself is unchanged."); }
       };
       return <article className="order-card" key={o.id}>
+        {expiredReservation(o, now) && <p role="status"><strong>Unpaid reservation expired</strong> - review payment, then cancel and restore stock below. No automatic cancellation has occurred.</p>}
         <header className="order-card-header"><label className="order-select"><input type="checkbox" checked={selected.includes(o.id)} onChange={() => toggleSelected(o.id)} /><span className="sr-only">Select order #{o.order_number}</span></label><div><p>Order reference</p><h2>#{o.order_number ?? o.id.slice(0, 8)}</h2></div><span className={`status-badge payment-${o.payment_status ?? "awaiting_payment"}`}>Payment: {paymentStatusLabel(o.payment_status)}</span></header>
         <div className="order-meta"><div><span>Customer</span><b>{customerName}</b><small>{o.profiles?.email ?? "No email available"}</small></div><div><span>Date</span><b>{new Date(o.created_at).toLocaleString("en-CA")}</b></div><div><span>Total</span><b>{orderMoney(o.total_cents, o.currency ?? "CAD")}</b></div><div><span>Payment method</span><b>{paymentMethodLabel(o.payment_method)}</b></div></div>
         <div className="order-products"><h3>Products</h3><ul>{o.order_items?.map((item: any) => <li key={`${o.id}-${item.product_name}-${item.shade ?? "standard"}`}><b>{item.product_name}</b>{item.shade && <span>Options: {item.shade}</span>}<span>Quantity: {item.quantity} · {orderMoney(item.unit_price_cents, o.currency ?? "CAD")} each · Subtotal: {orderMoney(item.unit_price_cents * item.quantity, o.currency ?? "CAD")}</span></li>)}</ul></div>
         {detailId === o.id && <div className="order-detail"><div><span>Delivery</span><b>{[address.address, address.unit, `${address.city ?? ""}${address.province ? `, ${address.province}` : ""}`, address.postal_code, address.country].filter(Boolean).join(" · ")}</b><small>{address.phone ? `Phone: ${address.phone}` : ""}</small></div><div><span>Payment</span><b>{paymentMethodLabel(o.payment_method)} · {paymentStatusLabel(o.payment_status)}</b><small>{o.paid_at ? `Paid: ${new Date(o.paid_at).toLocaleString("en-CA")}` : o.payment_expires_at ? `Payment requested before: ${new Date(o.payment_expires_at).toLocaleString("en-CA")}` : "Not yet paid"}</small></div><div><span>Email notifications</span><b>Order email: {orderEmail?.status ?? "not sent"}</b><small>{o.payment_status === "paid" ? `Payment email: ${paymentEmail?.status ?? "not sent"}` : "Payment email is sent only after payment confirmation."}</small></div><div><span>Inventory</span><b>{o.inventory_reservation_status === "reserved" ? "Reserved for this unpaid order" : o.inventory_reservation_status === "restored" ? "Restored to stock" : o.inventory_reservation_status === "committed" ? "Committed to paid order" : "Legacy order — not tracked"}</b><small>{o.inventory_restored_at ? `Restored: ${new Date(o.inventory_restored_at).toLocaleString("en-CA")}` : o.cancellation_reason ?? ""}</small></div><div><span>Totals</span><b>Shipping {orderMoney(o.shipping_cents, o.currency ?? "CAD")} · Total {orderMoney(o.total_cents, o.currency ?? "CAD")}</b><small>Order status: {orderStatusLabel(o.status)}</small></div></div>}
-        <div className="order-actions"><button className="product-table-action" onClick={() => setDetailId(detailId === o.id ? null : o.id)}>{detailId === o.id ? "Hide details" : "View details"}</button><div><span>Order status</span><label className="status-select"><span className="sr-only">Order status</span><select disabled={o.inventory_reservation_status === "reserved"} title={o.inventory_reservation_status === "reserved" ? "Confirm payment or cancel and restore stock first." : undefined} value={o.status} onChange={async (event) => { try { await updateOrderStatus(o.id, event.target.value as any); await refresh(); note("Order status updated."); } catch (error) { console.error("Order status update failed:", error); note("Order status could not be updated."); } }}>{["pending", "paid", "fulfilled", "cancelled", "refunded"].map((status) => <option key={status} value={status}>{orderStatusLabel(status)}</option>)}</select></label></div>
-          {o.payment_status === "awaiting_payment" && <button type="button" className="btn dark order-payment-action" onClick={async () => { if (confirm(`Confirm that you independently verified payment for Order #${o.order_number}?`)) { try { await confirmManualPayment(o.id); await refresh(); try { await sendOrderEmail(o.id, "payment_confirmed"); await refresh(); note("Payment marked as paid and confirmation email sent."); } catch (emailError) { console.error("Payment confirmation email failed:", emailError); await refresh(); note("Payment is confirmed, but the email could not be sent."); } } catch (error) { console.error("Payment confirmation failed:", error); note("Payment could not be confirmed."); } } }}>Mark as Paid</button>}
+        <div className="order-actions"><button className="product-table-action" onClick={() => setDetailId(detailId === o.id ? null : o.id)}>{detailId === o.id ? "Hide details" : "View details"}</button><div><span>Order status</span><label className="status-select"><span className="sr-only">Order status</span><select disabled={o.inventory_reservation_status === "reserved"} title={o.inventory_reservation_status === "reserved" ? "Confirm payment or cancel and restore stock first." : undefined} value={o.status} onChange={async (event) => { try { await updateOrderStatus(o.id, event.target.value as any); await refresh(); note("Order status updated."); } catch (error) { logOperationFailure("Order status update failed:", error); note("Order status could not be updated."); } }}>{["pending", "paid", "fulfilled", "cancelled", "refunded"].map((status) => <option key={status} value={status}>{orderStatusLabel(status)}</option>)}</select></label></div>
+          {o.payment_status === "awaiting_payment" && <button type="button" className="btn dark order-payment-action" onClick={async () => { if (confirm(`Confirm that you independently verified payment for Order #${o.order_number}?`)) { try { await confirmManualPayment(o.id); await refresh(); try { await sendOrderEmail(o.id, "payment_confirmed"); await refresh(); note("Payment marked as paid and confirmation email sent."); } catch (emailError) { logOperationFailure("Payment confirmation email failed:", emailError); await refresh(); note("Payment is confirmed, but the email could not be sent."); } } catch (error) { logOperationFailure("Payment confirmation failed:", error); note("Payment could not be confirmed."); } } }}>Mark as Paid</button>}
           {orderEmail?.status === "failed" && <button type="button" className="product-table-action" onClick={() => void retryEmail("order_created")}>Retry order email</button>}
           {o.payment_status === "paid" && <PaymentConfirmationEmailAction orderId={o.id} paymentStatus={o.payment_status} notification={paymentEmail} refresh={refreshEmails} />}
-          {o.payment_status === "awaiting_payment" && o.inventory_reservation_status === "reserved" && <button type="button" className="delete-product product-table-action" onClick={async () => { if (confirm(`Cancel Order #${o.order_number} and restore its reserved inventory?`)) { try { await cancelUnpaidOrder(o.id); await refresh(); note("Unpaid order cancelled and inventory restored."); } catch (error) { console.error("Unpaid order cancellation failed:", error); note("The order could not be cancelled."); } } }}>Cancel & restore stock</button>}
-          {view === "active" ? <button className="product-table-action" onClick={async () => { try { await archiveOrders([o.id]); await refresh(); note("Order archived."); } catch (error) { console.error("Order archive failed:", error); note("Order could not be archived."); } }}>Archive order</button> : <button className="product-table-action restore-product" onClick={async () => { try { await restoreOrder(o.id); await refresh(); note("Order restored."); } catch (error) { console.error("Order restore failed:", error); note("Order could not be restored."); } }}>Restore order</button>}
-          <button className="delete-product product-table-action" disabled={o.inventory_reservation_status === "reserved"} title={o.inventory_reservation_status === "reserved" ? "Cancel this unpaid order and restore stock before deleting it." : undefined} onClick={async () => { if (confirm(`Permanently delete Order #${o.order_number}? This cannot be undone.`)) { try { await deleteOrders([o.id]); await refresh(); note("Order permanently deleted."); } catch (error) { console.error("Order deletion failed:", error); note("Order could not be deleted. Cancel unpaid reservations before deletion."); } } }}>Delete order permanently</button></div>
+          {o.payment_status === "awaiting_payment" && o.inventory_reservation_status === "reserved" && <button type="button" className="delete-product product-table-action" disabled={releasing !== null} onClick={() => void releaseReservation(o)}>{releasing === o.id ? "Releasing..." : expiredReservation(o, now) ? "Cancel expired reservation & restore stock" : "Cancel & restore stock"}</button>}
+          {view === "active" ? <button className="product-table-action" onClick={async () => { try { await archiveOrders([o.id]); await refresh(); note("Order archived."); } catch (error) { logOperationFailure("Order archive failed:", error); note("Order could not be archived."); } }}>Archive order</button> : <button className="product-table-action restore-product" onClick={async () => { try { await restoreOrder(o.id); await refresh(); note("Order restored."); } catch (error) { logOperationFailure("Order restore failed:", error); note("Order could not be restored."); } }}>Restore order</button>}
+          <button className="delete-product product-table-action" disabled={o.inventory_reservation_status === "reserved"} title={o.inventory_reservation_status === "reserved" ? "Cancel this unpaid order and restore stock before deleting it." : undefined} onClick={async () => { if (confirm(`Permanently delete Order #${o.order_number}? This cannot be undone.`)) { try { await deleteOrders([o.id]); await refresh(); note("Order permanently deleted."); } catch (error) { logOperationFailure("Order deletion failed:", error); note("Order could not be deleted. Cancel unpaid reservations before deletion."); } } }}>Delete order permanently</button></div>
       </article>;
     }) : <p>No {view} orders match these filters.</p>}
   </section>;

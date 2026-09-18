@@ -189,4 +189,36 @@ test('product option SQL contract in isolated PostgreSQL', async t => {
     await assert.rejects(order(id, selections), /Invalid product options/)
     await order(id, [])
   })
+  await t.test('reserved products cannot be deleted; release is repeat-safe and paid snapshots survive deletion', async () => {
+    await db.exec('reset role');
+    await db.exec('alter table orders add column paid_at timestamptz, add column inventory_restored_at timestamptz, add column cancellation_reason text;');
+    await db.exec(safe.slice(safe.indexOf('create or replace function public.confirm_manual_payment('), safe.indexOf('create or replace function public.prevent_reserved_order_deletion(')));
+    await db.exec(read('20260918150000_protect_reserved_product_deletion.sql'));
+    await db.exec(read('20260918150000_protect_reserved_product_deletion.sql'));
+    await user(admin);
+    const releaseProduct = await save(null, [], { slug: 'release-fixture', inventory_quantity: 5 });
+    await user(customer);
+    const reserved = await order(releaseProduct, [], 2);
+    await assert.rejects(db.query('select cancel_unpaid_order($1)', [reserved.order_id]), /Administrator access required/);
+    await assert.rejects(db.query('select confirm_manual_payment($1)', [reserved.order_id]), /Administrator access required/);
+    await db.exec('reset role');
+    await assert.rejects(db.query('delete from products where id=$1', [releaseProduct]), error => error.code === 'BLG01');
+    await db.query('update products set is_active=false where id=$1', [releaseProduct]);
+    await user(admin);
+    await db.query('select cancel_unpaid_order($1)', [reserved.order_id]);
+    await db.query('select cancel_unpaid_order($1)', [reserved.order_id]);
+    assert.equal((await inspect('select inventory_quantity from products where id='+releaseProduct))[0].inventory_quantity, 5);
+    await db.query('delete from products where id=$1', [releaseProduct]);
+    const paidProduct = await save(null, [], { slug: 'paid-fixture', inventory_quantity: 5 });
+    await user(customer);
+    const paid = await order(paidProduct, [], 1);
+    await user(admin);
+    await db.query('select confirm_manual_payment($1)', [paid.order_id]);
+    await assert.rejects(db.query('select cancel_unpaid_order($1)', [paid.order_id]), /Only an active unpaid reservation/);
+    await db.exec('reset role');
+    await db.query('delete from products where id=$1', [paidProduct]);
+    const history = (await db.query('select product_id,product_name,unit_price_cents from order_items where order_id=$1', [paid.order_id])).rows[0];
+    assert.deepEqual(history, { product_id: null, product_name: 'Fixture', unit_price_cents: 1000 });
+  })
+
 })
