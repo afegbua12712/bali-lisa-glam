@@ -52,13 +52,13 @@ export function PaymentConfirmationEmailAction({ orderId, paymentStatus, notific
     finally { locked.current = false }
   }
 
-  return <div>
+  return <div className="payment-email-action">
     <button type="button" className="product-table-action"
       disabled={sending || sent || needsRefresh || !eligibility.canSend}
       onClick={() => void send()}>
       {sending ? 'Sending…' : sent || notification?.status === 'sent' ? 'Email sent' : 'Resend payment confirmation email'}
     </button>
-    <p role="status" aria-live="polite">{message || eligibility.message}</p>
+    <p className="payment-email-note" role="status" aria-live="polite">{message || (notification?.status === 'sent' ? 'Duplicate sending is disabled.' : eligibility.message)}</p>
     {!sending && !sent && (needsRefresh || notification?.status === 'sending') &&
       <button type="button" className="product-table-action" onClick={() => void checkStatus()}>Refresh email status</button>}
   </div>

@@ -96,7 +96,7 @@ test('sender formatting preserves accepted forms and brackets display-name addre
   assert.equal(format('  noreply@example.test  '), 'noreply@example.test')
 })
 
-test('Edge Function renders a claimed payment email and only updates its ledger', async () => {
+for (const eventType of ['order_created', 'payment_confirmed']) test(`Edge Function renders ${eventType} with the persisted reference and only updates its ledger`, async () => {
   const source = readFileSync(new URL('../supabase/functions/send-order-email/index.ts', import.meta.url), 'utf8').replace(/^import .*\r?\n/, '')
   const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022 }, reportDiagnostics: true })
   assert.equal(compiled.diagnostics.length, 0)
@@ -109,7 +109,7 @@ test('Edge Function renders a claimed payment email and only updates its ledger'
     auth: { getUser: async () => { assert.equal(options.global.headers.Authorization, 'Bearer synthetic-session'); return { data: { user: { id: 'synthetic-admin' } } } } },
     rpc: async (name, args) => {
       assert.equal(name, 'claim_order_notification')
-      assert.deepEqual(args, { target_order_id: order.id, target_event_type: 'payment_confirmed' })
+      assert.deepEqual(args, { target_order_id: order.id, target_event_type: eventType })
       return { data: [{ notification_id: 'synthetic-notification', should_send: true }], status: 200 }
     },
   } : { from: table => ({
@@ -122,15 +122,19 @@ test('Edge Function renders a claimed payment email and only updates its ledger'
     async (url, options) => {
       providerCalls++
       assert.equal(url, 'https://api.resend.com/emails')
-      assert.equal(options.headers['Idempotency-Key'], 'blg-order-synthetic-order-payment_confirmed')
+      assert.equal(options.headers['Idempotency-Key'], `blg-order-synthetic-order-${eventType}`)
       const body = JSON.parse(options.body)
       assert.equal(body.from, 'Example Shop <noreply@example.test>')
-      assert.match(body.subject, /Payment confirmed/); assert.ok(body.subject.includes('BL-00042')); assert.ok(body.html.includes('BL-00042')); assert.ok(body.text.includes('BL-00042'))
+      if (eventType === 'payment_confirmed') assert.match(body.subject, /Payment confirmed/)
+      for (const value of [body.subject, body.html, body.text]) {
+        assert.ok(value.includes('BL-00042'))
+        assert.doesNotMatch(value, /#42|Order #/)
+      }
       assert.ok(body.html.includes('Shade: Rose · Size: M'))
       assert.ok(body.text.includes('Shade: Rose · Size: M'))
       return Response.json({ id: 'synthetic-provider-id' })
     })
-  const response = await handler(new Request('https://example.test', { method: 'POST', headers: { Authorization: 'Bearer synthetic-session' }, body: JSON.stringify({ order_id: order.id, event_type: 'payment_confirmed' }) }))
+  const response = await handler(new Request('https://example.test', { method: 'POST', headers: { Authorization: 'Bearer synthetic-session' }, body: JSON.stringify({ order_id: order.id, event_type: eventType }) }))
   assert.equal(response.status, 200)
   assert.equal((await response.json()).sent, true)
   assert.equal(providerCalls, 1)

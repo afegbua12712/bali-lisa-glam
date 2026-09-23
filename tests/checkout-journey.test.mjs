@@ -68,7 +68,7 @@ function harness(overrides = {}) {
     method: 'manual_whatsapp', address: { first_name: 'Fixture', address: '1 Test Street', country: 'Canada' },
     cart: [{ id: 1, quantity: 1 }], stockError: '', orderSubmissionStarted: { current: false },
     checkoutIdempotencyKey: { current: 'existing-key' }, recoveryLock: { current: false },
-    setBusy() {}, setStep() {}, setError(value) { state.error = value },
+    setBusy() {}, setStep(value) { state.step = value }, setError(value) { state.error = value },
     setNeedsSignIn(value) { state.signIn = value }, setConfirmation(value) { state.confirmation = value },
     setEmailNotice() {}, setHandoff(value) { state.href = value },
     sessionStorage: { removeItem() {} }, window: { dispatchEvent() {} }, Event,
@@ -87,6 +87,29 @@ function harness(overrides = {}) {
   context.prepareHandoff = callback('prepareHandoff', '  const submit = async', context)
   return { state, context, submit: callback('submit', '  if (confirmation)', context) }
 }
+
+test('delivery validation follows the country and preserves international shipping safeguards', async () => {
+  const base = { first_name: 'Test', last_name: 'Customer', email: 'customer@example.test', phone: '+14165550100', address: '1 Test Street', city: 'Toronto', province: 'Ontario', postal_code: 'M5V 2T6', country: 'Canada' }
+  for (const [changes, shippingConfigured, succeeds] of [
+    [{}, true, true], [{ postal_code: '90210' }, true, false], [{ province: '' }, true, false],
+    [{ country: 'United States', province: 'California', postal_code: '90210' }, true, true],
+    [{ country: 'United States', province: '' }, true, false],
+    [{ country: 'United Kingdom', province: '', postal_code: 'SW1A 1AA' }, true, true],
+    [{ country: 'Hong Kong', province: '', postal_code: '' }, true, true],
+    [{ country: 'Hong Kong', province: '', postal_code: '' }, false, false],
+  ]) {
+    const address = { ...base, ...changes }
+    const { state, submit } = harness({ step: 1, address, shippingConfigured, isCanada: address.country === 'Canada' })
+    await submit({ preventDefault() {} })
+    assert.equal(state.step === 2, succeeds, JSON.stringify(changes))
+    assert.equal(state.creates, 0)
+    assert.deepEqual(journey.readCheckoutDraft({ getItem: () => JSON.stringify(address) }), address)
+  }
+  assert.equal(journey.checkoutAddressRules('Canada').postalLabel, 'Postal code')
+  assert.equal(journey.checkoutAddressRules('United States').regionLabel, 'State')
+  assert.equal(journey.checkoutAddressRules('United States').postalLabel, 'ZIP code')
+  assert.equal(journey.checkoutAddressRules('Hong Kong').postalRequired, false)
+})
 
 test('unavailable payment channel and invalid stock stop before order creation', async () => {
   for (const override of [{ settings: {} }, { stockError: 'Update your bag.' }]) {

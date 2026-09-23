@@ -64,11 +64,13 @@ import { getCustomerAccount, saveCustomerAddress, saveCustomerProfile, toggleWis
 import { clearAuthCallbackUrl, friendlyAuthError, getAuthRedirectUrl, isAuthRateLimited } from "./lib/auth";
 import { sendOrderEmail } from "./lib/order-email";
 import { PaymentConfirmationEmailAction } from "./PaymentConfirmationEmailAction";
-import { availableQuantity, bagStockError, paymentContact, paymentHref, readCheckoutDraft } from "./lib/checkout-journey";
+import { availableQuantity, bagStockError, checkoutAddressRules, paymentContact, paymentHref, readCheckoutDraft } from "./lib/checkout-journey";
 import { checkoutFailure, logCheckoutFailure } from "./lib/checkout-errors";
 import "./layout-spacing.css";
 import "./product-media-reviews.css";
 import "./order-fulfillment.css";
+import "./checkout-polish.css";
+import { PaymentMethodOptions } from "./PaymentMethodOptions";
 import { ProductGallery } from "./ProductGallery";
 import { ProductImagesEditor } from "./ProductImagesEditor";
 import { ProductReviews } from "./ProductReviews";
@@ -264,21 +266,33 @@ export default function App() {
     return () => { document.body.style.overflow = previousOverflow; window.removeEventListener("keydown", closeOnEscape); };
   }, [menu]);
   useEffect(() => {
-    const load = async () => {
+    let alive = true;
+    let generation = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = async (request: number, expectedUserId?: string) => {
       try {
         const { user: authUser, profile } = await getProfile();
+        if (!alive || request !== generation) return;
+        if (expectedUserId && authUser?.id !== expectedUserId) return;
         setUser(authUser?.email ?? null);
-        setIsAdmin(profile?.role === "admin");
+        setIsAdmin(Boolean(authUser && profile?.id === authUser.id && profile.role === "admin"));
       } catch {
+        if (!alive || request !== generation) return;
         setUser(null);
         setIsAdmin(false);
       }
     };
-    void load();
+    void load(++generation);
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
-      void load();
+      // Hide immediately during auth changes; discard stale profile responses.
+      // Defer Supabase calls until the auth callback has returned.
+      const request = ++generation;
+      setIsAdmin(false);
+      setUser(session?.user.email ?? null);
+      clearTimeout(timer);
+      if (session?.user) timer = setTimeout(() => { void load(request, session.user.id); }, 0);
       if (event === "PASSWORD_RECOVERY") {
         clearAuthCallbackUrl();
         setAuthIntent("recovery");
@@ -294,7 +308,7 @@ export default function App() {
         }
       }
     });
-    return () => subscription.unsubscribe();
+    return () => { alive = false; generation++; clearTimeout(timer); subscription.unsubscribe(); };
   }, []);
   return (
     <div className="app">
@@ -1040,6 +1054,7 @@ function Checkout({ cart, subtotal, back, user, signIn, stockError }: any) {
       .catch(() => undefined);
   }, []);
   const isCanada = (address.country ?? "Canada").trim().toLowerCase() === "canada";
+  const addressRules = checkoutAddressRules(address.country);
   const standardShippingCents = isCanada
     ? settings?.standard_shipping_cents
     : settings?.international_standard_shipping_cents;
@@ -1111,15 +1126,17 @@ Thank you.`;
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (step === 1) {
+      const addressRules = checkoutAddressRules(address.country);
       const requiredFields = [
         ["first_name", "first name"],
         ["last_name", "last name"],
         ["email", "email address"],
         ["phone", "phone number"],
         ["address", "street address"],
-        ["city", "city"],
-        ["province", isCanada ? "province or territory" : "state, province, or region"],
         ["country", "country"],
+        ...(addressRules.regionRequired ? [["province", addressRules.regionLabel]] : []),
+        ["city", "city"],
+        ...(addressRules.postalRequired ? [["postal_code", addressRules.postalLabel]] : []),
       ] as const;
       const missingField = requiredFields.find(([field]) => !address[field]?.trim());
       if (missingField) {
@@ -1288,35 +1305,35 @@ Thank you.`;
                   onChange={(e) => setAddress({ ...address, unit: e.target.value })}
                 />
               </label>
+              <label>
+                Country
+                <select required autoComplete="country-name" value={checkoutCountries.includes(address.country ?? "Canada") ? address.country ?? "Canada" : "__other__"} onChange={(e) => setAddress({ ...address, country: e.target.value === "__other__" ? "" : e.target.value, province: "", postal_code: "" })}>{checkoutCountries.map((country) => <option key={country} value={country}>{country}</option>)}<option value="__other__">Other country</option></select>
+              </label>
+              {!checkoutCountries.includes(address.country ?? "Canada") && <label>Country name<input required autoComplete="country-name" value={address.country ?? ""} onChange={(e) => setAddress({ ...address, country: e.target.value })} placeholder="Enter destination country" /></label>}
               <div className="form-row">
+                <label>
+                  {addressRules.regionLabel}
+                  {isCanada ? <select required autoComplete="address-level1" value={address.province ?? ""} onChange={(e) => setAddress({ ...address, province: e.target.value })}><option value="">Select province or territory</option>{canadianProvinces.map((province) => <option key={province} value={province}>{province}</option>)}</select> : <input required={addressRules.regionRequired} autoComplete="address-level1" value={address.province ?? ""} onChange={(e) => setAddress({ ...address, province: e.target.value })} />}
+                </label>
                 <label>
                   City
                   <input
                     required
+                    autoComplete="address-level2"
                     value={address.city ?? ""}
                     onChange={(e) => setAddress({ ...address, city: e.target.value })}
                   />
                 </label>
-                <label>
-                  {isCanada ? "Province / territory" : "State / province / region"}
-                  {isCanada ? <select required value={address.province ?? ""} onChange={(e) => setAddress({ ...address, province: e.target.value })}><option value="">Select province or territory</option>{canadianProvinces.map((province) => <option key={province} value={province}>{province}</option>)}</select> : <input required value={address.province ?? ""} onChange={(e) => setAddress({ ...address, province: e.target.value })} />}
-                </label>
               </div>
-              <div className="form-row">
                 <label>
-                  {isCanada ? "Postal code" : "Postal / ZIP code (if applicable)"}
+                  {addressRules.postalLabel}
                   <input
-                    required={isCanada}
+                    required={addressRules.postalRequired}
+                    autoComplete="postal-code"
                     value={address.postal_code ?? ""}
                     onChange={(e) => setAddress({ ...address, postal_code: e.target.value })}
                   />
                 </label>
-                <label>
-                  Country
-                  <select required value={checkoutCountries.includes(address.country ?? "Canada") ? address.country ?? "Canada" : "__other__"} onChange={(e) => setAddress({ ...address, country: e.target.value === "__other__" ? "" : e.target.value, province: "", postal_code: "" })}>{checkoutCountries.map((country) => <option key={country} value={country}>{country}</option>)}<option value="__other__">Other country</option></select>
-                </label>
-              </div>
-              {!checkoutCountries.includes(address.country ?? "Canada") && <label>Country name<input required value={address.country ?? ""} onChange={(e) => setAddress({ ...address, country: e.target.value })} placeholder="Enter destination country" /></label>}
               {!isCanada && <p>All prices and order totals are in CAD. Destination-country duties, taxes, or import fees may be charged separately and are the customer’s responsibility.</p>}
             </>
           ) : (
@@ -1328,24 +1345,8 @@ Thank you.`;
                 provide payment instructions privately. Send your payment receipt after payment.
                 Your order will be confirmed only after payment has been verified.
               </p>
-              <label>
-                <input
-                  type="radio"
-                  checked={method === "manual_whatsapp"}
-                  onChange={() => setMethod("manual_whatsapp")}
-                />{" "}
-                WhatsApp Payment — continue privately on WhatsApp
-              </label>
-              <label>
-                <input
-                  type="radio"
-                  checked={method === "manual_email"}
-                  onChange={() => setMethod("manual_email")}
-                />{" "}
-                Email Payment — request instructions by email
-              </label>
+              <PaymentMethodOptions method={method} onChange={setMethod} whatsappAvailable={Boolean(paymentContact(settings, "manual_whatsapp"))} emailAvailable={Boolean(paymentContact(settings, "manual_email"))} />
               {!paymentContact(settings, method) && <p role="status">This contact method is currently unavailable. Choose another method or <a href="#/contact" target="_blank" rel="noopener noreferrer">contact support</a>.</p>}
-              <p>Credit / Debit Card — Stripe: Coming soon</p>
             </>
           )}
           {stockError && <p role="alert">{stockError}</p>}

@@ -1,5 +1,16 @@
 import { contactLinks } from './support-pages'
 
+export function checkoutAddressRules(country = 'Canada') {
+  const name = country.trim().toLowerCase()
+  const canada = name === 'canada', unitedStates = name === 'united states'
+  return {
+    regionLabel: canada ? 'Province / territory' : unitedStates ? 'State' : 'State / province / region (optional)',
+    postalLabel: canada ? 'Postal code' : unitedStates ? 'ZIP code' : 'Postal / ZIP code (if applicable)',
+    regionRequired: canada || unitedStates,
+    postalRequired: canada || unitedStates,
+  }
+}
+
 export function availableQuantity(productId: number, inventory: number | undefined, bag: Array<{ id: number; quantity: number }>) {
   if (!Number.isFinite(inventory)) return 0
   return Math.max(0, (inventory ?? 0) - bag.filter(line => line.id === productId).reduce((sum, line) => sum + line.quantity, 0))
