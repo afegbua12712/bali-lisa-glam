@@ -65,7 +65,7 @@ test('checkout blocks missing sessions and preserves the key on RPC rejection', 
     const context = {
       step: 2, settings: {}, stockError: "", paymentContact: () => "mailto:help@example.test", setNeedsSignIn: () => {}, orderSubmissionStarted: started,
       setBusy: () => {}, setError: value => { message = value },
-      supabase: { auth: { getSession: async () => ({ data: { session: hasSession ? {} : null }, error: null }) } },
+      customerId: 'customer-a', supabase: { auth: { getSession: async () => ({ data: { session: hasSession ? { user: { id: 'customer-a' } } : null }, error: null }) } },
       cart: [], address: {}, method: 'manual_email', checkoutIdempotencyKey: key,
       createManualOrder: async (...args) => {
         calls++

@@ -13,5 +13,23 @@ export async function getCustomerAccount() {
   return { user, profile, orders: orders ?? [], address, wishlist: wishlist ?? [] }
 }
 export async function saveCustomerProfile(input: Record<string, string>) { const { data:{user} }=await supabase.auth.getUser(); if(!user) throw new Error('Sign in required'); const {error}=await supabase.from('profiles').update({first_name:input.first_name,last_name:input.last_name,phone:input.phone,updated_at:new Date().toISOString()}).eq('id',user.id); if(error) throw error }
-export async function saveCustomerAddress(input: Record<string, string>) { const {data:{user}}=await supabase.auth.getUser(); if(!user) throw new Error('Sign in required'); const {error}=await supabase.from('customer_addresses').upsert({customer_id:user.id,...input,updated_at:new Date().toISOString()}); if(error) throw error }
+export async function getCustomerDelivery(customerId: string) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user || user.id !== customerId) throw new Error('Sign in required')
+  const [profileResult, addressResult] = await Promise.all([
+    supabase.from('profiles').select('first_name,last_name,email,phone').eq('id', user.id).single(),
+    supabase.from('customer_addresses').select('first_name,last_name,address,unit,country,province,city,postal_code,phone').eq('customer_id', user.id).maybeSingle(),
+  ])
+  if (profileResult.error || addressResult.error) throw profileResult.error ?? addressResult.error
+  return { user, profile: profileResult.data, address: addressResult.data }
+}
+export async function saveCustomerAddress(input: Record<string, string>, expectedCustomerId?: string) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user || (expectedCustomerId && user.id !== expectedCustomerId)) throw new Error('Sign in required')
+  // Only address columns are writable; never spread caller-supplied ownership or profile fields.
+  const fields = ['first_name', 'last_name', 'address', 'unit', 'country', 'province', 'city', 'postal_code', 'phone']
+  const address = Object.fromEntries(fields.map(key => [key, typeof input[key] === 'string' ? input[key].trim() : key === 'country' ? 'Canada' : '']))
+  const { error } = await supabase.from('customer_addresses').upsert({ ...address, customer_id: user.id, updated_at: new Date().toISOString() }, { onConflict: 'customer_id' })
+  if (error) throw error
+}
 export async function toggleWishlist(productId:number, saved:boolean) { const {data:{user}}=await supabase.auth.getUser(); if(!user) throw new Error('Sign in required'); const q=saved?supabase.from('wishlists').delete().eq('customer_id',user.id).eq('product_id',productId):supabase.from('wishlists').upsert({customer_id:user.id,product_id:productId}); const {error}=await q; if(error) throw error }

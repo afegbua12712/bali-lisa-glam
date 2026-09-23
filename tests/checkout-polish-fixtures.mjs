@@ -31,12 +31,20 @@ const source = `import {useState,useEffect,useRef} from 'react';
   export ${viewSource('Header')}
   export function Mobile({isAdmin}) { const menu=true,page='home',setMenu=()=>{},go=()=>{},setCategory=()=>{};return <>${'{'}${mobile}${'}'}</> }
 `
-export function views(step = 1, country = 'Canada') {
+export function views(step = 1, country = 'Canada', savedDelivery = false) {
   let index=0
   const address={first_name:'Test',last_name:'Customer',email:'customer@example.test',phone:'+14165550100',address:'1 Test Street',city:'Toronto',country,province:country==='Canada'?'Ontario':'',postal_code:country==='Canada'?'M5V 2T6':''}
   const overrides=[step,address,'manual_whatsapp',{business_email:'support@example.test',whatsapp_number:'+14165550100',standard_shipping_cents:1000,international_standard_shipping_cents:2000}]
-  const react={...React,useState:initial=>{const i=index++;return React.useState(i<overrides.length?overrides[i]:initial)}}
+  const react={...React,useState:initial=>{const i=index++;return React.useState(i<overrides.length?overrides[i]:i===11&&savedDelivery?'Using your saved delivery details. You can edit any field below.':initial)}}
   const result=compile(source,{react,fixture:dependencies})
   const Checkout=result.Checkout
   return {...result,Checkout:props=>{index=0;return Checkout(props)}}
+}
+
+export function addressAccount(country = 'Canada') {
+  let index=0
+  const {CustomerDashboard}=compile(`import {useState,useEffect,useCallback} from 'react';import {checkoutAddressRules} from 'fixture';export ${viewSource('CustomerDashboard')}`,{
+    fixture:journey,react:{...React,useState:initial=>{const i=index++;return React.useState(i===0?{user:{id:'customer-a',email:'customer@example.test'},profile:{first_name:'Test'},address:{first_name:'Test',last_name:'Customer',phone:'+14165550100',address:'1 Saved Street',country,province:country==='Canada'?'Ontario':'',city:'Toronto',postal_code:country==='Canada'?'M5V 2T6':''}}:i===1?'Addresses':i===5?false:initial)}},
+  })
+  return props=>{index=0;return CustomerDashboard(props)}
 }

@@ -64,15 +64,15 @@ test('contact validation rejects missing or unsafe channels; handoff links encod
 function harness(overrides = {}) {
   const state = { creates: 0, summaries: 0, emails: 0, error: '', confirmation: null, href: '', signIn: false, failSummary: true }
   const context = {
-    step: 2, settings: { business_email: 'help@example.test', whatsapp_number: '+14165550100' },
+    step: 2, customerId: 'customer-a', draftKey: 'blg-checkout-draft:customer-a', idempotencyStorageKey: 'blg-checkout-idempotency-key:customer-a', saveDelivery: false, deliverySaveLock: { current: false }, settings: { business_email: 'help@example.test', whatsapp_number: '+14165550100' },
     method: 'manual_whatsapp', address: { first_name: 'Fixture', address: '1 Test Street', country: 'Canada' },
     cart: [{ id: 1, quantity: 1 }], stockError: '', orderSubmissionStarted: { current: false },
     checkoutIdempotencyKey: { current: 'existing-key' }, recoveryLock: { current: false },
     setBusy() {}, setStep(value) { state.step = value }, setError(value) { state.error = value },
     setNeedsSignIn(value) { state.signIn = value }, setConfirmation(value) { state.confirmation = value },
     setEmailNotice() {}, setHandoff(value) { state.href = value },
-    sessionStorage: { removeItem() {} }, window: { dispatchEvent() {} }, Event,
-    supabase: { auth: { getSession: async () => ({ data: { session: {} }, error: null }) } },
+    sessionStorage: { removeItem() {}, getItem() { return null } }, window: { dispatchEvent() {} }, Event,
+    supabase: { auth: { getSession: async () => ({ data: { session: { user: { id: 'customer-a' } } }, error: null }) } },
     createManualOrder: async () => { state.creates++; return { order_id: 'synthetic', order_reference: 'BL-00123' } },
     sendOrderEmail: async () => { state.emails++ },
     getManualOrderSummary: async () => {
@@ -127,6 +127,30 @@ test('expired session provides sign-in recovery without creating an order or rep
   assert.equal(state.creates, 0)
   assert.equal(context.checkoutIdempotencyKey.current, 'existing-key')
   assert.equal(context.orderSubmissionStarted.current, false)
+})
+
+test('intentional saving runs only after validation, locks repeats, and stops safely on save failure or account change',async()=>{
+  const address={first_name:'Test',last_name:'Customer',email:'customer@example.test',phone:'+14165550100',address:'1 Test Street',city:'Toronto',province:'Ontario',postal_code:'M5V 2T6',country:'Canada'}
+  for(const mode of ['save','unchecked','failure','invalid','unmounted']) {
+    let calls=0,release
+    const pending=new Promise(resolve=>{release=resolve})
+    const context={step:1,address:mode==='invalid'?{...address,postal_code:'bad'}:address,isCanada:true,shippingConfigured:true,saveDelivery:mode!=='unchecked',deliverySession:{current:true},setDeliveryNotice(){},saveCustomerAddress:async(input,id)=>{assert.deepEqual(input,address);assert.equal(id,'customer-a');calls++;await pending;if(mode==='failure')throw Error('offline')}}
+    const {state,submit}=harness(context)
+    const first=submit({preventDefault(){}})
+    if(!['invalid','unchecked'].includes(mode))await submit({preventDefault(){}})
+    if(mode==='unmounted')context.deliverySession.current=false
+    release();await first
+    assert.equal(calls,['invalid','unchecked'].includes(mode)?0:1)
+    assert.equal(state.step===2,['save','unchecked'].includes(mode))
+    assert.equal(state.creates,0)
+    if(mode==='failure')assert.match(state.error,/uncheck saving/)
+  }
+})
+
+test('an account switch cannot submit the previous customer delivery snapshot',async()=>{
+  const {state,submit}=harness({supabase:{auth:{getSession:async()=>({data:{session:{user:{id:'customer-b'}}}})}}})
+  await submit({preventDefault(){}})
+  assert.equal(state.creates,0);assert.equal(state.signIn,true)
 })
 
 test('created order survives summary failure; retries and repeated handoffs never recreate or resend email', async () => {

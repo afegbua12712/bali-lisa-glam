@@ -60,7 +60,7 @@ import {
   getManualOrderSummary,
   getPublicPaymentSettings,
 } from "./lib/manual-payment";
-import { getCustomerAccount, saveCustomerAddress, saveCustomerProfile, toggleWishlist } from "./lib/customer";
+import { getCustomerAccount, getCustomerDelivery, saveCustomerAddress, saveCustomerProfile, toggleWishlist } from "./lib/customer";
 import { clearAuthCallbackUrl, friendlyAuthError, getAuthRedirectUrl, isAuthRateLimited } from "./lib/auth";
 import { sendOrderEmail } from "./lib/order-email";
 import { PaymentConfirmationEmailAction } from "./PaymentConfirmationEmailAction";
@@ -138,6 +138,7 @@ export default function App() {
     [sort, setSort] = useState("Featured"),
     [toast, setToast] = useState(""),
     [user, setUser] = useState<string | null>(null),
+    [customerId, setCustomerId] = useState<string | null>(null),
     [isAdmin, setIsAdmin] = useState(false),
     [authIntent, setAuthIntent] = useState<"normal" | "recovery">("normal"),
     [cart, setCart] = useState<CartLine[]>(() =>
@@ -275,10 +276,12 @@ export default function App() {
         if (!alive || request !== generation) return;
         if (expectedUserId && authUser?.id !== expectedUserId) return;
         setUser(authUser?.email ?? null);
+        setCustomerId(authUser?.id ?? null);
         setIsAdmin(Boolean(authUser && profile?.id === authUser.id && profile.role === "admin"));
       } catch {
         if (!alive || request !== generation) return;
         setUser(null);
+        setCustomerId(null);
         setIsAdmin(false);
       }
     };
@@ -291,6 +294,9 @@ export default function App() {
       const request = ++generation;
       setIsAdmin(false);
       setUser(session?.user.email ?? null);
+      // Retain an already verified identity on token refresh; a different account
+      // must finish getProfile/getUser before its checkout draft can be displayed.
+      setCustomerId(current => current === session?.user.id ? current : null);
       clearTimeout(timer);
       if (session?.user) timer = setTimeout(() => { void load(request, session.user.id); }, 0);
       if (event === "PASSWORD_RECOVERY") {
@@ -427,10 +433,12 @@ export default function App() {
         {page === "product" && active && (
           <Detail key={active.id} bag={cart} product={products.find(p => p.id === active.id) ?? active} back={() => go("shop")} add={add} signedIn={Boolean(user)} signIn={() => { setReviewReturn(true); go("account"); }} />
         )}{" "}
-        {page === "account" && <Account user={user} setUser={setUser} note={note} add={add} goShop={() => go("shop")} authIntent={authIntent} clearAuthIntent={() => setAuthIntent("normal")} />}{" "}
+        {page === "account" && <Account key={customerId ?? "signed-out"} user={user} setUser={setUser} note={note} add={add} goShop={() => go("shop")} authIntent={authIntent} clearAuthIntent={() => setAuthIntent("normal")} />}{" "}
         {page === "admin" && <AdminGuard user={user} go={go} note={note} />}{" "}
         {page === "checkout" && (
           <Checkout
+            key={customerId ?? "signed-out"}
+            customerId={customerId}
             user={user}
             signIn={requestCheckoutSignIn}
             stockError={bagStockError(cart, products)}
@@ -1013,9 +1021,9 @@ function Cart({ open, close, cart, subtotal, update, remove, checkout, stockErro
     </>
   );
 }
-function Checkout({ cart, subtotal, back, user, signIn, stockError }: any) {
+function Checkout({ cart, subtotal, back, user, customerId, signIn, stockError }: any) {
   const [step, setStep] = useState(1),
-    [address, setAddress] = useState<Record<string, string>>(() => readCheckoutDraft(sessionStorage)),
+    [address, setAddress] = useState<Record<string, string>>(() => customerId ? readCheckoutDraft(sessionStorage, customerId) : { country: "Canada" }),
     [method, setMethod] = useState<"manual_whatsapp" | "manual_email">("manual_whatsapp"),
     [settings, setSettings] = useState<any>(null),
     [busy, setBusy] = useState(false),
@@ -1024,35 +1032,44 @@ function Checkout({ cart, subtotal, back, user, signIn, stockError }: any) {
     [error, setError] = useState("");
   const [needsSignIn, setNeedsSignIn] = useState(false);
   const [handoff, setHandoff] = useState("");
+  const [saveDelivery, setSaveDelivery] = useState(false);
+  const [deliveryNotice, setDeliveryNotice] = useState("");
+  const draftKey = `blg-checkout-draft:${customerId}`;
+  const idempotencyStorageKey = `blg-checkout-idempotency-key:${customerId}`;
+  const deliverySaveLock = useRef(false);
+  const deliverySession = useRef(false);
   const recoveryLock = useRef(false);
-  const deliveryEdited = useRef(Object.entries(readCheckoutDraft(sessionStorage)).some(([key, value]) => value.trim() && (key !== "country" || value !== "Canada")));
-  useEffect(() => { if (!confirmation) sessionStorage.setItem("blg-checkout-draft", JSON.stringify(address)); }, [address, confirmation]);
+  const deliveryEdited = useRef(Boolean(customerId && sessionStorage.getItem(draftKey)));
+  useEffect(() => { if (customerId && !confirmation) sessionStorage.setItem(draftKey, JSON.stringify(address)); }, [address, confirmation, customerId, draftKey]);
   const orderSubmissionStarted = useRef(false);
   const checkoutIdempotencyKey = useRef(
-    sessionStorage.getItem("blg-checkout-idempotency-key") ?? crypto.randomUUID(),
+    (customerId && (sessionStorage.getItem(idempotencyStorageKey) || sessionStorage.getItem("blg-checkout-idempotency-key"))) || crypto.randomUUID(),
   );
   useEffect(() => {
-    sessionStorage.setItem("blg-checkout-idempotency-key", checkoutIdempotencyKey.current);
-  }, []);
+    if (customerId) sessionStorage.setItem(idempotencyStorageKey, checkoutIdempotencyKey.current);
+  }, [customerId, idempotencyStorageKey]);
   useEffect(() => {
     void getPublicPaymentSettings()
       .then(setSettings)
       .catch(() => setError("Payment contact details are not configured yet."));
   }, []);
   useEffect(() => {
-    void getCustomerAccount()
-      .then(({ profile, address: savedAddress }) => {
-        if (!savedAddress || deliveryEdited.current) return;
-        setAddress((current) => ({
-          ...savedAddress,
-          ...current,
-          email: current.email ?? profile?.email ?? "",
-          phone: current.phone ?? savedAddress.phone ?? profile?.phone ?? "",
-          country: savedAddress.country ?? "Canada",
-        }));
+    let active = true;
+    deliverySession.current = true;
+    if (customerId) void getCustomerDelivery(customerId)
+      .then(({ user: owner, profile, address: savedAddress }) => {
+        if (!active || owner.id !== customerId || deliveryEdited.current) return;
+        setAddress({
+          first_name: profile?.first_name ?? "", last_name: profile?.last_name ?? "",
+          phone: profile?.phone ?? "", ...savedAddress,
+          email: owner.email ?? profile?.email ?? "",
+          country: savedAddress?.country ?? "Canada",
+        });
+        if (savedAddress) setDeliveryNotice("Using your saved delivery details. You can edit any field below.");
       })
-      .catch(() => undefined);
-  }, []);
+      .catch(() => { if (active) setDeliveryNotice("Saved delivery details are unavailable. You can enter your details below."); });
+    return () => { active = false; deliverySession.current = false; };
+  }, [customerId]);
   const isCanada = (address.country ?? "Canada").trim().toLowerCase() === "canada";
   const addressRules = checkoutAddressRules(address.country);
   const standardShippingCents = isCanada
@@ -1161,6 +1178,19 @@ Thank you.`;
         setError("Shipping is not configured for this international destination. Please contact Bali & Lisa Glam before ordering.");
         return;
       }
+      if (deliverySaveLock.current) return;
+      if (saveDelivery) {
+        deliverySaveLock.current = true;
+        setBusy(true);
+        try {
+          await saveCustomerAddress(address, customerId);
+          if (!deliverySession.current) return;
+          setDeliveryNotice("Delivery details saved for future orders.");
+        } catch {
+          if (deliverySession.current) setError("We could not save your delivery details. Try again, or uncheck saving to continue without updating your saved address.");
+          return;
+        } finally { deliverySaveLock.current = false; setBusy(false); }
+      }
       setError("");
       setStep(2);
       return;
@@ -1177,7 +1207,7 @@ Thank you.`;
     try {
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       if (sessionError) throw sessionError;
-      if (!session) throw { code: "P0001", message: "Authentication required" };
+      if (!session || session.user.id !== customerId) throw { code: "P0001", message: "Authentication required" };
       const order = await createManualOrder(
         cart.map((x: CartLine) => ({ product_id: x.id, quantity: x.quantity, shade: x.shade, selected_options: x.selected_options })),
         address,
@@ -1186,11 +1216,12 @@ Thank you.`;
       );
       orderCreated = true;
       setConfirmation({ ...order, method });
-      sessionStorage.removeItem("blg-checkout-draft");
+      sessionStorage.removeItem(draftKey);
       void sendOrderEmail(order.order_id, "order_created")
         .then(() => setEmailNotice("We sent an order receipt to your email address."))
         .catch(() => setEmailNotice("Your order is safely recorded, but we could not send the email receipt. You can continue with payment and contact us if you need a copy."));
-      sessionStorage.removeItem("blg-checkout-idempotency-key");
+      sessionStorage.removeItem(idempotencyStorageKey);
+      if (sessionStorage.getItem("blg-checkout-idempotency-key") === checkoutIdempotencyKey.current) sessionStorage.removeItem("blg-checkout-idempotency-key");
       window.dispatchEvent(new Event("blg:checkout-complete"));
       await prepareHandoff({ ...order, method });
     } catch (error) {
@@ -1230,6 +1261,7 @@ Thank you.`;
         </div>
       </section>
     );
+  if (user && !customerId) return <section className="checkout"><p role="status">Loading your delivery details…</p></section>;
   if (!user || needsSignIn) return <section className="checkout"><div className="account-card"><h1>Sign in to checkout</h1>{error && <p role="alert">{error}</p>}<p>An account is required to place your order and track payment. Your bag and delivery draft will be kept in this tab.</p><button className="btn dark" onClick={signIn}>Sign in / Create account</button></div></section>;
   return (
     <section className="checkout">
@@ -1254,6 +1286,9 @@ Thank you.`;
           )}
           {step === 1 ? (
             <>
+              {deliveryNotice && <p className="delivery-notice" role="status">{deliveryNotice}</p>}
+              <fieldset className="delivery-fields" disabled={busy}>
+              <legend className="sr-only">Delivery details</legend>
               <div className="form-row">
                 <label>
                   First name
@@ -1335,6 +1370,8 @@ Thank you.`;
                   />
                 </label>
               {!isCanada && <p>All prices and order totals are in CAD. Destination-country duties, taxes, or import fees may be charged separately and are the customer’s responsibility.</p>}
+              <label className="save-delivery"><input type="checkbox" checked={saveDelivery} onChange={(event) => setSaveDelivery(event.target.checked)} /><span>Save these delivery details for future orders<small>Saved when you continue to payment. Your account email is used next time.</small></span></label>
+              </fieldset>
             </>
           ) : (
             <>
@@ -1504,13 +1541,13 @@ function CustomerDashboard({ setUser, note, add, goShop }: any) {
     const addressIsCanada = (address.country ?? "Canada").trim().toLowerCase() === "canada";
     const postal = (address.postal_code ?? "").toUpperCase().replace(/\s/g, "");
     if (addressIsCanada && !/^[ABCEGHJKLMNPRSTVXY]\d[A-Z]\d[A-Z]\d$/.test(postal)) { note("Enter a valid Canadian postal code."); return; }
-    void save(() => saveCustomerAddress({ ...address, postal_code: addressIsCanada ? `${postal.slice(0, 3)} ${postal.slice(3)}` : (address.postal_code ?? "").trim() }), "Default delivery address saved.");
+    void save(() => saveCustomerAddress({ ...address, postal_code: addressIsCanada ? `${postal.slice(0, 3)} ${postal.slice(3)}` : (address.postal_code ?? "").trim() }, data.user.id), "Default delivery address saved.");
   };
   return <section className="customer-account"><header><p className="eyebrow">MY ACCOUNT</p><h1>Welcome back, {profile.first_name || data.user.email.split("@")[0]}.</h1></header><nav>{["Overview", "My Orders", "Profile", "Addresses", "Wishlist", "Security"].map((x) => <button className={tab === x ? "active" : ""} onClick={() => setTab(x)} key={x}>{x}</button>)}<button onClick={async () => { await supabase.auth.signOut(); setUser(null); }}>Sign out</button></nav><main>
     {tab === "Overview" && <div className="account-summary"><article><b>{orders.length}</b><span>Orders</span></article><article><b>{orders.filter((o: any) => o.payment_status === "awaiting_payment").length}</b><span>Awaiting payment</span></article><article><b>{orders.filter((o: any) => o.payment_status === "paid").length}</b><span>Paid orders</span></article><article><b>{wish.length}</b><span>Saved items</span></article></div>}
     {tab === "My Orders" && <CustomerOrders orders={orders} refresh={load} />}
     {tab === "Profile" && <form className="account-form" onSubmit={(event) => { event.preventDefault(); void save(() => saveCustomerProfile(profile), "Profile saved."); }}><label>First name<input value={profile.first_name ?? ""} onChange={(event) => updateProfile("first_name", event.target.value)} /></label><label>Last name<input value={profile.last_name ?? ""} onChange={(event) => updateProfile("last_name", event.target.value)} /></label><label>Email<input disabled value={profile.email ?? ""} /></label><label>Phone<input value={profile.phone ?? ""} onChange={(event) => updateProfile("phone", event.target.value)} /></label><button className="btn dark" disabled={busy}>Save changes</button></form>}
-    {tab === "Addresses" && <form className="account-form" onSubmit={(event) => { event.preventDefault(); saveAddress(); }}>{["first_name", "last_name", "address", "unit", "city", "province", "postal_code", "country", "phone"].map((key) => <label key={key}>{key.replace("_", " ")}<input required={key !== "unit" && (key !== "postal_code" || (address.country ?? "Canada").trim().toLowerCase() === "canada")} value={address[key] ?? (key === "country" ? "Canada" : "")} onChange={(event) => updateAddress(key, event.target.value)} /></label>)}<button className="btn dark" disabled={busy}>Save address</button></form>}
+    {tab === "Addresses" && <form className="account-form" onSubmit={(event) => { event.preventDefault(); saveAddress(); }}><h2>Saved delivery details</h2><p>Your default address for future checkouts. Updating it does not change previous orders.</p>{["first_name", "last_name", "phone", "address", "unit", "country", "province", "city", "postal_code"].map((key) => <label key={key}>{key === "province" ? checkoutAddressRules(address.country).regionLabel : key === "postal_code" ? checkoutAddressRules(address.country).postalLabel : key === "unit" ? "Apartment / unit (optional)" : key.replace("_", " ")}<input required={key !== "unit" && (key !== "province" || checkoutAddressRules(address.country).regionRequired) && (key !== "postal_code" || checkoutAddressRules(address.country).postalRequired)} value={address[key] ?? (key === "country" ? "Canada" : "")} onChange={(event) => updateAddress(key, event.target.value)} /></label>)}<button className="btn dark" disabled={busy}>Save delivery details</button></form>}
     {tab === "Wishlist" && <div className="wishlist-grid">{wish.length ? wish.map((row: any) => { const p = row.products; const available = p?.is_active && p?.inventory_quantity > 0; return p && <article key={p.id}><img src={p.image_url} alt={p.name} /><b>{p.name}</b><span>{money(p.price_cents / 100)}</span><small>{available ? "Available" : "Currently unavailable"}</small>{available && <button className="btn dark" onClick={() => add({ id: p.id, name: p.name, category: "Saved item", price: p.price_cents / 100, rating: 0, reviews: 0, image: p.image_url, description: "", shades: ["Universal"], inventory: p.inventory_quantity })}>Add to bag</button>}<button onClick={() => void save(() => toggleWishlist(p.id, true), "Removed from wishlist.")}>Remove</button></article>; }) : <p>Your wishlist is waiting for something beautiful. <button className="text" onClick={goShop}>Explore products</button></p>}</div>}
     {tab === "Security" && <div className="account-form"><p>Use a secure password to protect your account.</p><form onSubmit={(event) => { event.preventDefault(); if (newPassword.length < 6) { note("Use a password with at least 6 characters."); return; } if (newPassword !== confirmNewPassword) { note("Passwords do not match."); return; } void save(async () => { const { error } = await supabase.auth.updateUser({ password: newPassword }); if (error) throw error; setNewPassword(""); setConfirmNewPassword(""); }, "Your password has been updated."); }}><label>New password<input required minLength={6} type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></label><label>Confirm new password<input required minLength={6} type="password" value={confirmNewPassword} onChange={(event) => setConfirmNewPassword(event.target.value)} /></label><button className="btn dark" disabled={busy}>Update password</button></form><button className="text" onClick={async () => { const { error } = await supabase.auth.resetPasswordForEmail(profile.email, { redirectTo: getAuthRedirectUrl() }); note(error ? "We could not send your password-reset link." : "Check your email for a password-reset link."); }}>Send a password-reset link instead</button></div>}
   </main></section>;

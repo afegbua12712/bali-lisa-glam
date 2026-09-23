@@ -8,7 +8,7 @@ const render=(Component,props)=>renderToStaticMarkup(createElement(Component,pro
 
 test('mounted checkout places country before region, city and postal fields for each destination',()=>{
   for(const country of ['Canada','United States','Hong Kong']) {
-    const html=render(views(1,country).Checkout,{cart:[],subtotal:10,user:'customer@example.test'})
+    const html=render(views(1,country).Checkout,{cart:[],subtotal:10,user:'customer@example.test',customerId:'customer-a'})
     const names=['country-name','address-level1','address-level2','postal-code']
     const positions=names.map(name=>html.indexOf(`autoComplete="${name}"`))
     assert.ok(positions.every((n,i)=>n>=0&&(!i||n>positions[i-1])))
@@ -24,8 +24,8 @@ test('desktop and mobile Studio links require the resolved admin role',()=>{
 })
 
 test('auth loading hides Studio, accepts multiple admin identities and ignores stale admin responses',async()=>{
-  const requests=[];let listener;let timer;let admin=false;let user
-  const context={useEffect:fn=>fn(),getProfile:()=>new Promise((resolve,reject)=>requests.push({resolve,reject})),setUser:v=>{user=v},setIsAdmin:v=>{admin=v},setTimeout:fn=>{timer=fn;return 1},clearTimeout:()=>{timer=undefined},supabase:{auth:{onAuthStateChange:fn=>{listener=fn;return {data:{subscription:{unsubscribe(){}}}}}}},window:{location:{hash:'',search:''}},URLSearchParams}
+  const requests=[];let listener;let timer;let admin=false;let user;let customerId=null
+  const context={setCustomerId:v=>{customerId=typeof v==='function'?v(customerId):v},useEffect:fn=>fn(),getProfile:()=>new Promise((resolve,reject)=>requests.push({resolve,reject})),setUser:v=>{user=v},setIsAdmin:v=>{admin=v},setTimeout:fn=>{timer=fn;return 1},clearTimeout:()=>{timer=undefined},supabase:{auth:{onAuthStateChange:fn=>{listener=fn;return {data:{subscription:{unsubscribe(){}}}}}}},window:{location:{hash:'',search:''}},URLSearchParams}
   const js=ts.transpileModule(authEffect,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText
   new Function(...Object.keys(context),js)(...Object.values(context))
   assert.equal(admin,false)
@@ -33,12 +33,12 @@ test('auth loading hides Studio, accepts multiple admin identities and ignores s
   await settle(null,null);assert.equal(admin,false)
   for(const [index,role] of ['customer','admin','admin'].entries()) {
     const id='identity-'+index
-    listener('SIGNED_IN',{user:{id,email:id+'@example.test'}});assert.equal(admin,false);timer()
-    await settle({id,role},id);assert.equal(admin,role==='admin')
+    listener('SIGNED_IN',{user:{id,email:id+'@example.test'}});assert.equal(admin,false);assert.equal(customerId,null);timer()
+    await settle({id,role},id);assert.equal(admin,role==='admin');assert.equal(customerId,id)
   }
   listener('SIGNED_IN',{user:{id:'old-admin'}});timer()
   listener('SIGNED_OUT',null);await settle({id:'old-admin',role:'admin'},'old-admin')
-  assert.equal(admin,false);assert.equal(user,null)
+  assert.equal(admin,false);assert.equal(user,null);assert.equal(customerId,null)
   listener('SIGNED_IN',{user:{id:'customer'}});timer()
   await settle({id:'different-user',role:'admin'},'customer');assert.equal(admin,false)
   listener('SIGNED_IN',{user:{id:'customer'}});timer();requests.shift().reject(Error('offline'));await Promise.resolve();assert.equal(admin,false)

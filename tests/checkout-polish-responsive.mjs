@@ -6,16 +6,16 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { read, views, email } from './checkout-polish-fixtures.mjs'
+import { read, views, email, addressAccount } from './checkout-polish-fixtures.mjs'
 const output=resolve('node_modules/.tmp/checkout-polish-browser')
 await mkdir(output,{recursive:true})
 const css=['index.css','App.css','readability.css','mobile.css','product-options.css','appearance.css','layout-spacing.css','product-media-reviews.css','order-fulfillment.css','checkout-polish.css'].map(f=>read('src/'+f)).join('\n').replace(/^@import.*$/gm,'')
 const render=(View,props)=>renderToStaticMarkup(createElement(View,props))
 const server=createServer((req,res)=>{
   const url=new URL(req.url,'http://localhost'),step=Number(url.searchParams.get('step')||1),admin=url.searchParams.get('admin')==='true',mobile=url.searchParams.get('mobile')==='true'
-  const {Checkout,Header,Mobile}=views(step)
-  const html=render(Header,{count:0,page:'home',isAdmin:admin})+(mobile?render(Mobile,{isAdmin:admin}):'')+render(Checkout,{cart:[],subtotal:10,user:'customer@example.test'})+`<section class="admin"><main class="admin-main"><div class="order-actions">${render(email.PaymentConfirmationEmailAction,{orderId:'fixture',paymentStatus:'paid',notification:{status:'sent'},refresh:async()=>{}})}</div></main></section>`
-  res.setHeader('Content-Type','text/html; charset=utf-8');res.end(`<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style></head><body><div id="root"><div class="app">${html}</div></div><script>${read('public/appearance.js')}</script></body></html>`)
+  const {Checkout,Header,Mobile}=views(step,'Canada',true)
+  const html=render(Header,{count:0,page:'home',isAdmin:admin})+(mobile?render(Mobile,{isAdmin:admin}):'')+render(Checkout,{cart:[],subtotal:10,user:'customer@example.test',customerId:'customer-a'})+`<section class="admin"><main class="admin-main"><div class="order-actions">${render(email.PaymentConfirmationEmailAction,{orderId:'fixture',paymentStatus:'paid',notification:{status:'sent'},refresh:async()=>{}})}</div></main></section>`
+  res.setHeader('Content-Type','text/html; charset=utf-8');res.end(`<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style></head><body><div id="root"><div class="app">${html}<section class="account-page">${render(addressAccount(),{})}</section></div></div><script>${read('public/appearance.js')}</script></body></html>`)
 })
 await new Promise(r=>server.listen(0,'127.0.0.1',r))
 const profile=`${output}/profile-${Date.now()}`
@@ -42,15 +42,26 @@ try {
     await evaluate(`window.blgAppearance.setPreference('${preference}')`)
     const value=JSON.parse(await evaluate(`JSON.stringify({
       width:innerWidth,scroll:document.documentElement.scrollWidth,theme:document.documentElement.dataset.theme,
-      overflow:[...document.querySelectorAll('.payment-method-card,.payment-email-note,.checkout input,.checkout select')].filter(e=>{const r=e.getBoundingClientRect();return r.left < -1 || r.right > innerWidth+1 || e.scrollWidth > e.clientWidth+2}).map(e=>e.className+':'+e.textContent.slice(0,40)),
+      overflow:[...document.querySelectorAll('.payment-method-card,.payment-email-note,.checkout input,.checkout select,.delivery-notice,.save-delivery,.account-form input')].filter(e=>{const r=e.getBoundingClientRect();return r.left < -1 || r.right > innerWidth+1 || e.scrollWidth > e.clientWidth+2}).map(e=>e.className+':'+e.textContent.slice(0,40)),
       fields:[...document.querySelectorAll('.checkout [autocomplete]')].map(e=>e.autocomplete),
       noteSize:getComputedStyle(document.querySelector('.payment-email-note')).fontSize,
+      headingGap:document.querySelector('.steps').getBoundingClientRect().top-document.querySelector('.checkout h1').getBoundingClientRect().bottom,
+      stepPadding:parseFloat(getComputedStyle(document.querySelector('.steps')).paddingBottom),
       studio:[...document.querySelectorAll('.header nav button')].some(e=>e.textContent==='Studio')
     })`))
     assert.equal(value.studio,false)
     assert.equal(value.noteSize,'12px')
+    assert.ok(value.headingGap>=28&&value.headingGap<=40,JSON.stringify(value))
+    assert.ok(value.stepPadding>=20)
     assert.equal(value.theme,preference==='default'?'dark':preference)
-    if(step===1) assert.deepEqual(value.fields,['country-name','address-level1','address-level2','postal-code'])
+    if(step===1) {
+      assert.deepEqual(value.fields,['country-name','address-level1','address-level2','postal-code'])
+      assert.equal(await evaluate(`!!document.querySelector('.delivery-notice')`),true)
+      await evaluate(`document.querySelector('.save-delivery input').focus()`)
+      await call('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space',windowsVirtualKeyCode:32})
+      await call('Input.dispatchKeyEvent',{type:'keyUp',key:' ',code:'Space',windowsVirtualKeyCode:32})
+      assert.equal(await evaluate(`document.querySelector('.save-delivery input').checked`),true)
+    }
     if(step===2) {
       await evaluate(`document.querySelector('input[value="manual_whatsapp"]').focus()`)
       assert.equal(await evaluate(`getComputedStyle(document.querySelector('.payment-method-card')).outlineStyle`),'solid')

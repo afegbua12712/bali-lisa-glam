@@ -33,9 +33,9 @@ export function paymentHref(contact: string, method: string, orderReference: str
     : `${contact}?subject=${encodeURIComponent(`Payment Request - Order ${orderReference}`)}&body=${encodeURIComponent(message)}`
 }
 
-export function readCheckoutDraft(storage: Pick<Storage, 'getItem'>): Record<string, string> {
+export function readCheckoutDraft(storage: Pick<Storage, 'getItem'>, customerId?: string): Record<string, string> {
   try {
-    const value = JSON.parse(storage.getItem('blg-checkout-draft') ?? '{}')
+    const value = JSON.parse(storage.getItem(customerId ? `blg-checkout-draft:${customerId}` : 'blg-checkout-draft') ?? '{}')
     if (!value || typeof value !== 'object' || Array.isArray(value)) return { country: 'Canada' }
     const fields = ['first_name', 'last_name', 'email', 'phone', 'address', 'unit', 'city', 'province', 'postal_code', 'country']
     return { country: 'Canada', ...Object.fromEntries(Object.entries(value).filter(([key, entry]) => fields.includes(key) && typeof entry === 'string')) }
