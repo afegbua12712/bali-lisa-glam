@@ -1,0 +1,89 @@
+/* Mounted app spacing: retain editorial breathing room without nested page padding. */
+:root {
+  --section-space: clamp(40px, 5vw, 72px);
+  --page-space: clamp(28px, 4vw, 52px);
+  --heading-space: clamp(24px, 3vw, 36px);
+}
+
+.hero { min-height: 0; align-items: stretch; }
+.hero-copy { padding: clamp(32px, 4.5vh, 52px) clamp(28px, 4.5vw, 72px); }
+.hero-copy > p:not(.eyebrow) { margin: 22px 0 26px; }
+.hero-image { height: auto; min-height: 540px; }
+.hero-image > img { position: absolute; inset: 0; }
+.section, .featured { padding-block: var(--section-space); }
+.head { margin-bottom: var(--heading-space); }
+.story > div:last-child { padding: var(--section-space) clamp(28px, 5vw, 80px); }
+
+.shop { padding-block: var(--page-space) var(--section-space); }
+.shop .page-title { margin-bottom: var(--heading-space); }
+.detail { padding-bottom: var(--section-space); }
+.promise { margin-top: var(--heading-space); }
+.empty { padding: var(--section-space) clamp(16px, 4vw, 48px); }
+.empty-cart { padding: var(--section-space) 28px; }
+
+.checkout { min-height: 0; padding-bottom: var(--page-space); }
+.checkout-logo { margin-bottom: 24px; }
+.checkout .back { margin-bottom: 20px; }
+.checkout .steps { margin-bottom: 24px; }
+.checkout input[type="radio"] {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  min-height: 0;
+  padding: 0;
+  margin: 0 8px 0 0;
+  vertical-align: middle;
+}
+.account-page { min-height: 0; padding-block: var(--page-space); }
+.account-page > .account-page { padding: 0; min-height: 0; }
+.account-page > .customer-account { width: 100%; padding: 0; min-height: 0; }
+.customer-account > main { min-height: 0; }
+.customer-account > nav { margin-block: 24px; }
+.admin-gate { min-height: 0; padding-block: var(--page-space); }
+.admin { min-height: 0; }
+.admin-main { padding-block: var(--page-space); min-width: 0; }
+.admin-main > header { margin-bottom: var(--heading-space); }
+.admin-main > .account-card { padding: 28px; }
+.product-inventory { overflow-x: auto; }
+.order-controls { grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); }
+.order-view-tabs { grid-column: 1 / -1; }
+
+.story-intro, .guide-intro { padding-block: var(--page-space) var(--section-space); }
+.story-manifesto, .guide-section, .guide-skin, .guide-routine,
+.guide-ingredients, .guide-finishes { padding-block: var(--section-space); }
+.values { padding-bottom: var(--section-space); }
+.story-close > div { padding: var(--section-space) clamp(28px, 5vw, 80px); }
+.guide-heading { margin-bottom: var(--heading-space); }
+.guide-care-grid { margin-top: var(--heading-space); }
+.support-page { padding-block: var(--page-space) var(--section-space); }
+
+@media (max-width: 1100px) {
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 800px) {
+  .hero { grid-template-columns: minmax(0, 1fr); }
+  .hero-copy { padding: 36px 24px 40px; }
+  .hero-image { grid-row: auto; height: clamp(290px, 65vw, 430px); min-height: 0; }
+  .hero-image > img { position: static; }
+  .hero-copy .btn { width: 100%; }
+  .section, .featured { padding-inline: 20px; }
+  .shop { padding-block: 24px var(--section-space); }
+  .shop .page-title { margin-bottom: 20px; }
+  .detail-grid { grid-template-columns: minmax(0, 1fr); gap: 26px; }
+  .gallery { height: clamp(290px, 85vw, 500px); }
+  .purchase { position: static; margin: 24px 0; padding: 0; box-shadow: none; }
+  .checkout-layout { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .checkout .summary { grid-row: auto; }
+  .account-card { padding: 28px 20px; }
+  .admin { display: block; }
+  .admin-nav { display: flex; width: 100%; position: static; padding: 12px 16px; }
+  .admin-nav > button:not(.wordmark) { width: auto; flex-shrink: 0; }
+  .admin-main { padding-inline: 16px; }
+  .admin-main > .account-card { padding: 24px 20px; }
+  .story, .story-close { grid-template-columns: minmax(0, 1fr); }
+  .story-manifesto { padding-inline: 24px; }
+  .story > div:first-child, .story-close img { height: clamp(280px, 70vw, 440px); }
+  .values { grid-template-columns: minmax(0, 1fr); }
+  .values h3 { margin-top: 20px; }
+}

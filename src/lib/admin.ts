@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import { normalizeOptions, type OptionGroup } from './product-options'
+import { productImages, type ProductImage } from './product-images'
 
 const PRODUCT_IMAGES_BUCKET = 'product-images'
 const IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
@@ -8,14 +9,15 @@ export type AdminProductInput = {
   name: string; slug: string; description: string; price_cents: number; inventory_quantity: number
   category_id: number | null; image_url: string; shades: string[]; is_active: boolean
   options: OptionGroup[]
+  images: ProductImage[]
 }
 
 export async function fetchAdminProducts(query = '') {
-  let request = supabase.from('products').select('id,name,slug,description,price_cents,inventory_quantity,is_active,image_url,shades,created_at,categories(id,name),product_option_groups(id,name,display_order,required,product_option_values(id,label,display_order,active,color))').order('created_at', { ascending: false })
+  let request = supabase.from('products').select('id,name,slug,description,price_cents,inventory_quantity,is_active,image_url,shades,created_at,categories(id,name),product_images(id,url,alt_text,display_order,option_value_id),product_option_groups(id,name,display_order,required,product_option_values(id,label,display_order,active,color))').order('created_at', { ascending: false })
   if (query.trim()) request = request.ilike('name', `%${query.trim()}%`)
   const { data, error } = await request
   if (error) throw error
-  return (data ?? []).map(product => ({ ...product, options: normalizeOptions(product.product_option_groups) }))
+  return (data ?? []).map(product => ({ ...product, images: productImages(product.product_images, product.image_url).map(image => ({ ...image, id: image.id === 'legacy' ? crypto.randomUUID() : image.id })), options: normalizeOptions(product.product_option_groups) }))
 }
 
 export async function fetchAdminCategories() {
@@ -37,12 +39,13 @@ export async function saveAdminProduct(input: AdminProductInput, id?: number) {
     is_active: input.is_active ?? true,
     updated_at: new Date().toISOString(),
   }
-  const { data, error } = await supabase.rpc('save_product_with_options', {
+  const { data, error } = await supabase.rpc('save_product_with_gallery', {
     target_product_id: id ?? null,
     product_data: payload,
     option_groups: (input.options ?? []).map((group, display_order) => ({ ...group, name: group.name.trim(), display_order,
       values: group.values.map((value, index) => ({ ...value, label: value.label.trim(), display_order: index })),
     })),
+    gallery: input.images.map((image, display_order) => ({ id: image.id, url: image.url.trim(), alt_text: image.alt_text.trim(), display_order, option_value_id: image.option_value_id })),
   })
   if (error) throw error
   return data

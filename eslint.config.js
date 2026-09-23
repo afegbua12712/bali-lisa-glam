@@ -10,6 +10,12 @@ export default defineConfig([
   { files: ['src/AppearanceControl.tsx'], extends: [js.configs.recommended, tseslint.configs.recommended, reactHooks.configs.flat.recommended, reactRefresh.configs.vite], languageOptions: { globals: globals.browser } },
   globalIgnores(['dist', 'src/admin', 'src/components', 'src/hooks', 'src/routes', 'src/router.tsx', 'src/lib/config.server.ts', 'src/lib/utils.ts']),
   {
+    files: ['src/ProductGallery.tsx', 'src/ProductImagesEditor.tsx', 'src/ProductReviews.tsx', 'src/AdminReviews.tsx', 'src/lib/product-images.ts', 'src/lib/reviews.ts', 'src/lib/admin.ts'],
+    extends: [js.configs.recommended, tseslint.configs.recommended, reactHooks.configs.flat.recommended, reactRefresh.configs.vite],
+    languageOptions: { globals: globals.browser },
+    rules: { '@typescript-eslint/no-explicit-any': 'off', 'react-hooks/set-state-in-effect': 'off' },
+  },
+  {
     files: ['src/lib/checkout-journey.ts', 'src/lib/seo.ts', 'src/SupportPages.tsx', 'src/lib/support-pages.ts', 'src/CartButton.tsx', 'src/ProductOptionSelectors.tsx', 'src/ProductOptionsEditor.tsx', 'src/lib/product-options.ts', 'src/main.tsx', 'src/App.tsx', 'src/lib/supabase.ts', 'src/lib/store.ts', 'src/PaymentConfirmationEmailAction.tsx', 'src/lib/payment-email-state.ts', 'src/lib/order-email.ts', 'src/lib/checkout-errors.ts'],
     extends: [js.configs.recommended, tseslint.configs.recommended, reactHooks.configs.flat.recommended, reactRefresh.configs.vite],
     languageOptions: { globals: globals.browser },

@@ -64,6 +64,13 @@ import { sendOrderEmail } from "./lib/order-email";
 import { PaymentConfirmationEmailAction } from "./PaymentConfirmationEmailAction";
 import { availableQuantity, bagStockError, paymentContact, paymentHref, readCheckoutDraft } from "./lib/checkout-journey";
 import { checkoutFailure, logCheckoutFailure } from "./lib/checkout-errors";
+import "./layout-spacing.css";
+import "./product-media-reviews.css";
+import { ProductGallery } from "./ProductGallery";
+import { ProductImagesEditor } from "./ProductImagesEditor";
+import { ProductReviews } from "./ProductReviews";
+import { AdminReviews } from "./AdminReviews";
+import { associatedImage, productImages, type ProductImage, type EditableImage } from "./lib/product-images";
 
 type Product = {
   id: number;
@@ -73,6 +80,7 @@ type Product = {
   rating: number;
   reviews: number;
   image: string;
+  images?: ProductImage[];
   description: string;
   shades: string[];
   inventory?: number;
@@ -131,6 +139,7 @@ export default function App() {
       readSavedCart({ getItem: key => sessionStorage.getItem(key) }),
     ),
     [catalogVersion, setCatalogVersion] = useState(0);
+  const [reviewReturn, setReviewReturn] = useState(false);
   const requestCheckoutSignIn = () => { sessionStorage.setItem("blg-checkout-return", "true"); setUser(null); go("account"); };
   useEffect(() => {
     if (user && authIntent !== "recovery" && sessionStorage.getItem("blg-checkout-return")) {
@@ -138,6 +147,12 @@ export default function App() {
       setPage("checkout");
     }
   }, [user, authIntent]);
+  useEffect(() => {
+    if (user && reviewReturn && active && authIntent !== "recovery") {
+      setReviewReturn(false);
+      setPage("product");
+    }
+  }, [user, reviewReturn, active, authIntent]);
   const go = (p: typeof page) => {
     if (pageFromHash(window.location.hash)) {
       history.replaceState(null, "", window.location.pathname + window.location.search);
@@ -393,7 +408,7 @@ export default function App() {
           />
         )}{" "}
         {page === "product" && active && (
-          <Detail bag={cart} product={products.find(p => p.id === active.id) ?? active} back={() => go("shop")} add={add} />
+          <Detail key={active.id} bag={cart} product={products.find(p => p.id === active.id) ?? active} back={() => go("shop")} add={add} signedIn={Boolean(user)} signIn={() => { setReviewReturn(true); go("account"); }} />
         )}{" "}
         {page === "account" && <Account user={user} setUser={setUser} note={note} add={add} goShop={() => go("shop")} authIntent={authIntent} clearAuthIntent={() => setAuthIntent("normal")} />}{" "}
         {page === "admin" && <AdminGuard user={user} go={go} note={note} />}{" "}
@@ -602,8 +617,7 @@ function Card({ p, show, add, note }: any) {
       </div>
       <div className="card-bottom">
         <span className="rating">
-          <Star size={14} fill="currentColor" />
-          {p.rating} <small>({p.reviews})</small>
+          {p.reviews > 0 ? <><Star size={14} fill="currentColor" />{p.rating} <small>({p.reviews})</small></> : 'No reviews yet'}
         </span>
         <button disabled={p.inventory <= 0} onClick={() => add(p)}>{p.inventory <= 0 ? "Out of stock" : "Add to bag"}</button>
       </div>
@@ -844,35 +858,35 @@ function BeautyGuide({ shopLips }: any) {
     </section>
   );
 }
-function Detail({ product, back, add, bag }: any) {
+function Detail({ product, back, add, bag, signedIn, signIn }: any) {
   const remaining = availableQuantity(product.id, product.inventory, bag);
   const [selected, setSelected] = useState<Record<string, string>>({}),
     [optionError, setOptionError] = useState(""),
     [qty, setQty] = useState(1);
+  const images = productImages(product.images, product.image);
+  const [activeImage, setActiveImage] = useState<string | null>(null);
   useEffect(() => {
     setSelected({});
     setOptionError("");
     setQty(1);
-  }, [product]);
+    setActiveImage(null);
+  }, [product.id]);
   return (
     <section className="detail">
       <button className="back" onClick={back}>
         <ArrowLeft size={17} /> Back to collection
       </button>
       <div className="detail-grid">
-        <div className="gallery">
-          <img src={product.image} alt={product.name} />
-          <span>BALI & LISA GLAM</span>
-        </div>
+        <ProductGallery images={images} activeId={activeImage} onSelect={setActiveImage} name={product.name} />
         <div className="details">
           <p className="eyebrow">{product.category}</p>
           <h1>{product.name}</h1>
           <div className="detail-rating">
-            <Star size={16} fill="currentColor" /> {product.rating} <u>{product.reviews} reviews</u>
+            {product.reviews > 0 ? <><Star size={16} fill="currentColor" /> {product.rating} <a href="#product-reviews" onClick={event => { event.preventDefault(); document.getElementById('product-reviews')?.scrollIntoView({ behavior: 'smooth' }); }}>{product.reviews} reviews</a></> : 'No reviews yet'}
           </div>
           <h3>{money(product.price)}</h3>
           <p className="desc">{product.description}</p>
-          <ProductOptionSelectors groups={product.options ?? []} selected={selected} onChange={value => { setSelected(value); setOptionError(""); }} />
+          <ProductOptionSelectors groups={product.options ?? []} selected={selected} onChange={value => { const image = associatedImage(images, selected, value); if (image) setActiveImage(image); setSelected(value); setOptionError(""); }} />
           {optionError && <p role="alert">{optionError}</p>}
           {product.inventory <= 0 ? <p role="status">Out of stock</p> : remaining === 0 ? <p role="status">All available units are already in your bag.</p> : qty > remaining ? <p role="alert">Stock has changed. Reduce the quantity to {remaining} or fewer.</p> : null}
           <div className="purchase">
@@ -907,6 +921,7 @@ function Detail({ product, back, add, bag }: any) {
           <span>Shipping rates are shown at checkout. <a href="#/returns">View our Return &amp; Refund Policy.</a></span>
         </div>
       </section>
+      <ProductReviews key={product.id} productId={product.id} signedIn={signedIn} signIn={signIn} />
     </section>
   );
 }
@@ -1540,8 +1555,6 @@ function Admin({ note }: any) {
     [categories, setCategories] = useState<any[]>([]),
     [settings, setSettings] = useState<any>(null),
     [editing, setEditing] = useState<any>(null),
-    [imageFile, setImageFile] = useState<File | null>(null),
-    [imagePreview, setImagePreview] = useState(""),
     [uploadingImage, setUploadingImage] = useState(false),
     [editorError, setEditorError] = useState(""),
     [query, setQuery] = useState("");
@@ -1575,32 +1588,35 @@ function Admin({ note }: any) {
   useEffect(() => {
     if (!editing) return;
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !uploadingImage) {
         setEditing(null);
-        setImageFile(null);
-        setImagePreview("");
+
         setEditorError("");
       }
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [editing]);
+  }, [editing, uploadingImage]);
+  const saveLock = useRef(false);
   const saveProduct = async (e: FormEvent) => {
     e.preventDefault();
+    if (saveLock.current) return;
     const optionError = validateOptionEditor(editing.options ?? []);
     if (optionError) { setEditorError(optionError); return; }
+    if (!editing.images?.length) { setEditorError("Add at least one product image."); return; }
+    saveLock.current = true; setUploadingImage(true);
     try {
       setEditorError("");
-      let imageUrl = editing.image_url;
-      if (imageFile) {
-        setUploadingImage(true);
-        imageUrl = await uploadProductImage(imageFile);
-        setUploadingImage(false);
+      const images: EditableImage[] = [];
+      for (const image of editing.images as EditableImage[]) {
+        const url = image.file ? await uploadProductImage(image.file) : image.url;
+        images.push({ ...image, file: undefined, url });
+        // Keep successful uploads for a retry if a later upload or save fails.
+        setEditing((current: any) => ({ ...current, images: current.images.map((item: EditableImage) => item.id === image.id ? { ...item, file: undefined, url } : item) }));
       }
-      await saveAdminProduct({ ...editing, image_url: imageUrl }, editing.id);
+      await saveAdminProduct({ ...editing, images, image_url: images[0].url }, editing.id);
       setEditing(null);
-      setImageFile(null);
-      setImagePreview("");
+
       await load();
       window.dispatchEvent(new Event("blg:catalog-updated"));
       note("Product saved.");
@@ -1612,27 +1628,13 @@ function Admin({ note }: any) {
       setEditorError(message);
       note(message);
     } finally {
-      setUploadingImage(false);
+      saveLock.current = false; setUploadingImage(false);
     }
   };
   const closeEditor = () => {
+    if (uploadingImage) return;
     setEditing(null);
-    setImageFile(null);
-    setImagePreview("");
-    setEditorError("");
-  };
-  const chooseProductImage = (file?: File) => {
-    if (!file) return;
-    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
-      setEditorError("Choose a JPG, PNG, or WEBP image.");
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      setEditorError("Choose an image smaller than 5 MB.");
-      return;
-    }
-    setImageFile(file);
-    setImagePreview(URL.createObjectURL(file));
+
     setEditorError("");
   };
   return (
@@ -1642,7 +1644,7 @@ function Admin({ note }: any) {
           BALI & LISA <i>GLAM</i>
         </button>
         <p>ADMIN STUDIO</p>
-        {["Overview", "Products", "Orders", "Customers", "Settings"].map((x) => (
+        {["Overview", "Products", "Orders", "Customers", "Reviews", "Settings"].map((x) => (
           <button className={active === x ? "selected" : ""} onClick={() => setActive(x)} key={x}>
             {x}
           </button>
@@ -1658,8 +1660,7 @@ function Admin({ note }: any) {
             <button
               className="btn dark"
               onClick={() => {
-                setImageFile(null);
-                setImagePreview("");
+
                 setEditorError("");
                 setEditing({
                   name: "",
@@ -1671,6 +1672,7 @@ function Admin({ note }: any) {
                   image_url: "",
                   shades: ["Universal"],
                   options: [],
+                  images: [],
                   is_active: true,
                 });
               }}
@@ -1701,8 +1703,7 @@ function Admin({ note }: any) {
             query={query}
             setQuery={setQuery}
             edit={(product: any) => {
-              setImageFile(null);
-              setImagePreview("");
+
               setEditorError("");
               setEditing(product);
             }}
@@ -1738,6 +1739,8 @@ function Admin({ note }: any) {
           />
         ) : active === "Orders" ? (
           <AdminOrders orders={orders} refresh={load} refreshEmails={async () => setOrders(await fetchAdminOrders())} note={note} />
+        ) : active === "Reviews" ? (
+          <AdminReviews />
         ) : active === "Customers" ? (
           <AdminCustomers customers={customers} />
         ) : (
@@ -1765,31 +1768,14 @@ function Admin({ note }: any) {
                 </div>
                 <button
                   type="button"
-                  className="icon product-editor-close"
+                  className="icon product-editor-close" disabled={uploadingImage}
                   aria-label="Close product editor"
                   onClick={closeEditor}
                 >
                   <X size={22} />
                 </button>
               </header>
-              <div className="product-editor-content">
-                <div className="image-upload-field">
-                  <label htmlFor="product-image-file">Product image</label>
-                  <input
-                    id="product-image-file"
-                    type="file"
-                    accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
-                    onChange={(event) => chooseProductImage(event.target.files?.[0])}
-                  />
-                  <small>{imageFile ? imageFile.name : "JPG, PNG, or WEBP. Maximum 5 MB."}</small>
-                  {(imagePreview || editing.image_url) && (
-                    <img
-                      className="product-image-preview"
-                      src={imagePreview || editing.image_url}
-                      alt="Product image preview"
-                    />
-                  )}
-                </div>
+              <fieldset className="product-editor-content" disabled={uploadingImage}>
                 {[
                   ["name", "Name"],
                   ["slug", "Slug"],
@@ -1815,14 +1801,6 @@ function Admin({ note }: any) {
                   </label>
                 ))}
                 <label>
-                  Image URL (optional fallback)
-                  <input
-                    required={!imageFile}
-                    value={editing.image_url ?? ""}
-                    onChange={(event) => setEditing({ ...editing, image_url: event.target.value })}
-                  />
-                </label>
-                <label>
                   Category
                   <select
                     value={editing.category_id ?? ""}
@@ -1837,15 +1815,19 @@ function Admin({ note }: any) {
                     ))}
                   </select>
                 </label>
-                <ProductOptionsEditor groups={editing.options ?? []} onChange={options => setEditing({ ...editing, options })} />
+                <ProductOptionsEditor groups={editing.options ?? []} onChange={options => {
+                  const validValues = new Set(options.flatMap(group => group.values.map(value => value.id)));
+                  setEditing({ ...editing, options, images: (editing.images ?? []).map((image: EditableImage) => ({ ...image, option_value_id: image.option_value_id && validValues.has(image.option_value_id) ? image.option_value_id : null })) });
+                }} />
+                <ProductImagesEditor images={editing.images ?? []} groups={editing.options ?? []} onChange={images => setEditing({ ...editing, images })} />
                 {editorError && (
                   <p className="product-editor-error" role="alert">
                     {editorError}
                   </p>
                 )}
-              </div>
+              </fieldset>
               <footer className="product-editor-footer">
-                <button type="button" className="btn editor-cancel" onClick={closeEditor}>
+                <button type="button" className="btn editor-cancel" disabled={uploadingImage} onClick={closeEditor}>
                   Cancel
                 </button>
                 <button className="btn dark" disabled={uploadingImage}>

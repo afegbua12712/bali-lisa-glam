@@ -1,0 +1,31 @@
+.product-gallery { min-width: 0; }
+.gallery-thumbnails { display: flex; gap: 10px; overflow-x: auto; padding: 12px 3px; }
+.gallery-thumbnails button { flex: 0 0 68px; height: 76px; padding: 3px; border: 1px solid var(--line); }
+.gallery-thumbnails button[aria-pressed="true"] { border: 2px solid var(--clay); }
+.gallery-thumbnails img { width: 100%; height: 100%; object-fit: cover; }
+.gallery-thumbnails button:focus-visible, .image-editor-actions button:focus-visible,
+.review-actions button:focus-visible { outline: 2px solid var(--clay); outline-offset: 2px; }
+.product-editor > fieldset.product-editor-content { border: 0; margin: 0; min-width: 0; }
+.product-images-editor p { font-size: 14px; line-height: 1.6; }
+.image-editor-item { border: 1px solid var(--line); margin: 18px 0; padding: 14px; min-width: 0; }
+.image-editor-item > img { width: 100%; height: 180px; object-fit: contain; background: var(--cream); margin-bottom: 14px; }
+.image-editor-actions, .review-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.image-editor-actions button, .product-images-editor > button, .review-actions button,
+.admin-reviews > button { border: 1px solid var(--line); min-height: 44px; padding: 10px 12px; font-size: 14px; }
+.product-reviews { margin-top: var(--section-space); border-top: 1px solid var(--line); padding-top: var(--heading-space); }
+.product-reviews h2 { font: 600 clamp(28px, 4vw, 38px)/1.2 var(--serif); }
+.product-reviews p, .admin-reviews p { line-height: 1.65; overflow-wrap: anywhere; }
+.product-reviews form { max-width: 700px; margin-top: 28px; }
+.product-reviews fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.product-reviews label { font-size: 15px; margin: 18px 0 8px; }
+.product-reviews select, .product-reviews textarea, .admin-reviews select { display: block; width: 100%; border: 1px solid var(--line); background: var(--cream); color: var(--ink); padding: 12px; font: inherit; }
+.product-reviews textarea { resize: vertical; min-height: 130px; margin-bottom: 18px; }
+.review-list article, .admin-reviews article { border-bottom: 1px solid var(--line); padding: 20px 0; }
+.review-list p, .review-body { white-space: pre-wrap; }
+.review-list time { display: block; margin-top: 8px; font-size: 14px; color: var(--muted); }
+.admin-reviews select { max-width: 280px; margin-top: 8px; }
+.admin-reviews h2 { font: 600 24px var(--serif); overflow-wrap: anywhere; }
+@media (max-width: 800px) {
+  .product-gallery .gallery { height: clamp(290px, 85vw, 500px); }
+  .product-reviews .btn { width: 100%; }
+}

@@ -1,5 +1,7 @@
 import { supabase } from './supabase'
 import { normalizeOptions, type OptionGroup, type OptionSelection } from './product-options'
+import { productImages, type ProductImage } from './product-images'
+import { fetchReviewStats } from './reviews'
 
 export type StoreProduct = {
   id: number
@@ -9,6 +11,7 @@ export type StoreProduct = {
   rating: number
   reviews: number
   image: string
+  images: ProductImage[]
   description: string
   shades: string[]
   badge?: string
@@ -22,14 +25,19 @@ type ProductRow = {
   description: string; shades: string[]; badge: string | null; is_new: boolean; inventory_quantity: number
   categories: { name: string } | null
   product_option_groups: Parameters<typeof normalizeOptions>[0]
+  product_images: ProductImage[]
 }
 
 export async function fetchProducts(): Promise<StoreProduct[]> {
-  const { data, error } = await supabase.from('products').select('id,name,price_cents,rating,review_count,image_url,description,shades,badge,is_new,inventory_quantity,categories(name),product_option_groups(id,name,display_order,required,product_option_values(id,label,display_order,active,color))').eq('is_active', true).order('created_at', { ascending: false })
+  const { data, error } = await supabase.from('products').select('id,name,price_cents,image_url,description,shades,badge,is_new,inventory_quantity,categories(name),product_images(id,url,alt_text,display_order,option_value_id),product_option_groups(id,name,display_order,required,product_option_values(id,label,display_order,active,color))').eq('is_active', true).order('created_at', { ascending: false })
   if (error) throw error
+  const stats = await fetchReviewStats()
   return (data as unknown as ProductRow[]).map(product => ({
     id: product.id, name: product.name, category: product.categories?.name ?? 'Beauty', price: product.price_cents / 100,
-    rating: product.rating, reviews: product.review_count, image: product.image_url, description: product.description,
+    rating: stats.find(row => row.product_id === product.id)?.average_rating ?? 0,
+    reviews: stats.find(row => row.product_id === product.id)?.review_count ?? 0,
+    image: productImages(product.product_images, product.image_url)[0]?.url ?? '',
+    images: productImages(product.product_images, product.image_url), description: product.description,
     shades: product.shades, badge: product.badge ?? undefined, new: product.is_new, inventory: product.inventory_quantity,
     options: normalizeOptions(product.product_option_groups),
   }))
