@@ -5,7 +5,7 @@ export type ManualPaymentMethod = 'manual_whatsapp' | 'manual_email'
 
 export type CreatedManualOrder = {
   order_id: string
-  order_number: number
+  order_reference: string
   subtotal_cents: number
   shipping_cents: number
   total_cents: number
@@ -15,7 +15,7 @@ export type CreatedManualOrder = {
 }
 
 export async function createManualOrder(lines: Array<{ product_id: number; quantity: number; shade: string; selected_options?: OptionSelection[] }>, shippingAddress: Record<string, string>, method: ManualPaymentMethod, idempotencyKey: string) {
-  const { data, error } = await supabase.rpc('create_manual_order', { lines, shipping_address: shippingAddress, selected_payment_method: method, idempotency_key: idempotencyKey })
+  const { data, error } = await supabase.rpc('create_manual_order_with_reference', { lines, shipping_address: shippingAddress, selected_payment_method: method, idempotency_key: idempotencyKey })
   if (error) throw error
   return (data as CreatedManualOrder[])[0]
 }
@@ -23,12 +23,12 @@ export async function createManualOrder(lines: Array<{ product_id: number; quant
 export async function getManualOrderSummary(orderId: string) {
   const { data, error } = await supabase
     .from('orders')
-    .select('order_number, subtotal_cents, shipping_cents, total_cents, currency, order_items(product_name, shade, quantity, unit_price_cents)')
+    .select('order_reference, subtotal_cents, shipping_cents, total_cents, currency, order_items(product_name, shade, quantity, unit_price_cents)')
     .eq('id', orderId)
     .single()
   if (error) throw error
   return data as {
-    order_number: number
+    order_reference: string
     subtotal_cents: number
     shipping_cents: number
     total_cents: number

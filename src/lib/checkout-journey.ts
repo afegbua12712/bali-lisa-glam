@@ -17,9 +17,9 @@ export function paymentContact(settings: { business_email?: string; whatsapp_num
   return method === 'manual_whatsapp' ? links.whatsapp?.href : links.email?.href
 }
 
-export function paymentHref(contact: string, method: string, orderNumber: number, message: string) {
+export function paymentHref(contact: string, method: string, orderReference: string, message: string) {
   return method === 'manual_whatsapp' ? `${contact}?text=${encodeURIComponent(message)}`
-    : `${contact}?subject=${encodeURIComponent(`Payment Request - Order #${orderNumber}`)}&body=${encodeURIComponent(message)}`
+    : `${contact}?subject=${encodeURIComponent(`Payment Request - Order ${orderReference}`)}&body=${encodeURIComponent(message)}`
 }
 
 export function readCheckoutDraft(storage: Pick<Storage, 'getItem'>): Record<string, string> {

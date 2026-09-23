@@ -1,3 +1,6 @@
+import { OrderProgress } from "./OrderProgress";
+import { OrderFulfillmentAction } from "./OrderFulfillmentAction";
+import { orderStatusLabel } from "./lib/order-fulfillment";
 import { readSavedCart, logOperationFailure, productDeletionMessage, expiredReservation } from "./lib/reliability";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
@@ -50,7 +53,6 @@ import {
   restoreOrder,
   saveAdminProduct,
   saveSettings,
-  updateOrderStatus,
   uploadProductImage,
 } from "./lib/admin";
 import {
@@ -66,6 +68,7 @@ import { availableQuantity, bagStockError, paymentContact, paymentHref, readChec
 import { checkoutFailure, logCheckoutFailure } from "./lib/checkout-errors";
 import "./layout-spacing.css";
 import "./product-media-reviews.css";
+import "./order-fulfillment.css";
 import { ProductGallery } from "./ProductGallery";
 import { ProductImagesEditor } from "./ProductImagesEditor";
 import { ProductReviews } from "./ProductReviews";
@@ -1076,7 +1079,7 @@ My name is ${[address.first_name, address.last_name].filter(Boolean).join(" ")}.
 
 I would like to complete payment for my order.
 
-Order Reference: #${orderSummary.order_number}
+Order Reference: ${orderSummary.order_reference}
 
 ORDER DETAILS
 
@@ -1100,7 +1103,7 @@ Thank you.`;
 
       const contact = paymentContact(settings, order.method);
       if (!contact) throw new Error("Contact unavailable");
-      setHandoff(paymentHref(contact, order.method, order.order_number, message));
+      setHandoff(paymentHref(contact, order.method, orderSummary.order_reference, message));
     } catch {
       setError("Your order is recorded. We could not load the payment contact details. Retry below, or contact support with your order number. Do not place another order.");
     } finally { recoveryLock.current = false; setBusy(false); }
@@ -1194,7 +1197,7 @@ Thank you.`;
           <p className="eyebrow">ORDER CREATED</p>
           <h1>Payment awaiting confirmation</h1>
           <p>
-            Order #{confirmation.order_number} is pending payment verification. Contact Bali & Lisa
+            Order {confirmation.order_reference} is pending payment verification. Contact Bali & Lisa
             Glam using your selected method and send your receipt privately.
           </p>
           <p><b>Total: {orderMoney(confirmation.total_cents, confirmation.currency)}</b></p>
@@ -1202,7 +1205,7 @@ Thank you.`;
           <p>Opening WhatsApp or email does not complete payment. Request instructions, complete payment and send your receipt. Bali &amp; Lisa Glam verifies payment before confirming it.</p>
           {error && <p role="alert">{error}</p>}
           {handoff ? <a className="btn dark" href={handoff} target={confirmation.method === "manual_whatsapp" ? "_blank" : undefined} rel="noopener noreferrer">{confirmation.method === "manual_whatsapp" ? "Open WhatsApp" : "Open Email"}</a> : <button className="btn dark" disabled={busy} onClick={() => void prepareHandoff(confirmation)}>{busy ? "Loading payment details..." : "Retry payment details"}</button>}
-          <p><a href="#/contact" target="_blank" rel="noopener noreferrer">Contact support</a> with Order #{confirmation.order_number} if you need help.</p>
+          <p><a href="#/contact" target="_blank" rel="noopener noreferrer">Contact support</a> with Order {confirmation.order_reference} if you need help.</p>
           {emailNotice && <p role="status">{emailNotice}</p>}
           <button className="btn dark" onClick={back}>
             Continue shopping
@@ -1515,7 +1518,7 @@ function CustomerOrders({ orders, refresh }: any) {
   const [filter, setFilter] = useState("all");
   const [detail, setDetail] = useState<string | null>(null);
   const list = orders.filter((order: any) => filter === "all" || order.payment_status === filter || order.status === filter);
-  return <section className="customer-orders"><button className="text" onClick={() => void refresh()}>Refresh status</button><select aria-label="Filter orders" value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">All Orders</option><option value="awaiting_payment">Awaiting Payment</option><option value="paid">Paid</option><option value="fulfilled">Fulfilled</option></select>{list.length ? list.map((order: any) => { const delivery = order.shipping_address ?? {}; const currency = order.currency ?? "CAD"; return <article key={order.id}><button className="order-open" onClick={() => setDetail(detail === order.id ? null : order.id)}><b>Order #{order.order_number}</b><span>{new Date(order.created_at).toLocaleDateString("en-CA")} · {orderMoney(order.total_cents, currency)}</span><span>Payment: {paymentStatusLabel(order.payment_status)} · {orderStatusLabel(order.status)}</span></button>{detail === order.id && <div className="customer-order-detail"><p>{order.payment_status === "paid" ? "Payment successful — your payment has been confirmed." : order.payment_status === "cancelled" ? "This unpaid order was cancelled and its reserved inventory was released." : "Payment awaiting confirmation. If you have sent your receipt, no further action is required unless we contact you."}</p>{order.payment_status === "awaiting_payment" && order.payment_expires_at && <p>Payment requested before {new Date(order.payment_expires_at).toLocaleString("en-CA")}.</p>}<p><b>Delivery</b><br />{[delivery.address, delivery.unit, delivery.city, delivery.province, delivery.postal_code, delivery.country].filter(Boolean).join(", ") || "Delivery details are on file."}</p>{order.order_items.map((item: any, index: number) => <div key={`${item.product_name}-${index}`}><b>{item.product_name}</b><span>{item.shade ? `${item.shade} · ` : ""}Qty {item.quantity} · {orderMoney(item.unit_price_cents, currency)} each · {orderMoney(item.unit_price_cents * item.quantity, currency)}</span></div>)}<p>Merchandise: {orderMoney(order.subtotal_cents, currency)} · Shipping: {orderMoney(order.shipping_cents, currency)} · Total: {orderMoney(order.total_cents, currency)}</p></div>}</article>; }) : <p>You haven’t placed any orders yet.</p>}</section>;
+  return <section className="customer-orders"><button className="text" onClick={() => void refresh()}>Refresh status</button><select aria-label="Filter orders" value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">All Orders</option><option value="awaiting_payment">Awaiting Payment</option><option value="paid">Paid</option><option value="processing">Processing</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="fulfilled">Fulfilled (legacy)</option></select>{list.length ? list.map((order: any) => { const delivery = order.shipping_address ?? {}; const currency = order.currency ?? "CAD"; return <article key={order.id}><button className="order-open" onClick={() => setDetail(detail === order.id ? null : order.id)}><b>Order {order.order_reference}</b><span>{new Date(order.created_at).toLocaleDateString("en-CA")} · {orderMoney(order.total_cents, currency)}</span><span>Payment: {paymentStatusLabel(order.payment_status)} · {orderStatusLabel(order.status)}</span></button>{detail === order.id && <div className="customer-order-detail"><OrderProgress order={order} /><p>{order.payment_status === "paid" ? "Payment successful — your payment has been confirmed." : order.payment_status === "cancelled" ? "This unpaid order was cancelled and its reserved inventory was released." : "Payment awaiting confirmation. If you have sent your receipt, no further action is required unless we contact you."}</p>{order.payment_status === "awaiting_payment" && order.payment_expires_at && <p>Payment requested before {new Date(order.payment_expires_at).toLocaleString("en-CA")}.</p>}<p><b>Delivery</b><br />{[delivery.address, delivery.unit, delivery.city, delivery.province, delivery.postal_code, delivery.country].filter(Boolean).join(", ") || "Delivery details are on file."}</p>{order.order_items.map((item: any, index: number) => <div key={`${item.product_name}-${index}`}><b>{item.product_name}</b><span>{item.shade ? `${item.shade} · ` : ""}Qty {item.quantity} · {orderMoney(item.unit_price_cents, currency)} each · {orderMoney(item.unit_price_cents * item.quantity, currency)}</span></div>)}<p>Merchandise: {orderMoney(order.subtotal_cents, currency)} · Shipping: {orderMoney(order.shipping_cents, currency)} · Total: {orderMoney(order.total_cents, currency)}</p></div>}</article>; }) : <p>You haven’t placed any orders yet.</p>}</section>;
 }
 function AdminGuard({ user, go, note }: any) {
   const [isAdmin, setIsAdmin] = useState(false);
@@ -1967,10 +1970,6 @@ const paymentStatusLabel = (status?: string | null) =>
   ({ awaiting_payment: "Awaiting Payment", paid: "Paid", cancelled: "Cancelled" })[
     status ?? ""
   ] ?? "Awaiting Payment";
-const orderStatusLabel = (status?: string | null) =>
-  ({ pending: "Pending", paid: "Paid", fulfilled: "Fulfilled", cancelled: "Cancelled", refunded: "Refunded" })[
-    status ?? ""
-  ] ?? "Pending";
 
 function AdminOrders({ orders, refresh, refreshEmails, note }: any) {
   const [now, setNow] = useState(Date.now);
@@ -1980,7 +1979,7 @@ function AdminOrders({ orders, refresh, refreshEmails, note }: any) {
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 60000); return () => window.clearInterval(timer); }, []);
   const releaseReservation = async (order: any) => {
     if (releaseLock.current) return;
-    if (!confirm(`Cancel Order #${order.order_number} and restore its reserved inventory? Verify that no payment has been received first.`)) return;
+    if (!confirm(`Cancel Order ${order.order_reference} and restore its reserved inventory? Verify that no payment has been received first.`)) return;
     releaseLock.current = true; setReleasing(order.id); setReleaseError(null);
     try { await cancelUnpaidOrder(order.id); await refresh(); note("Unpaid order cancelled and inventory restored."); }
     catch (error) { logOperationFailure("reservation_release", error); setReleaseError("The order could not be cancelled or refreshed. Refresh orders to check its current state before trying again."); }
@@ -2002,10 +2001,10 @@ function AdminOrders({ orders, refresh, refreshEmails, note }: any) {
     .filter((order: any) => view === "archived" ? Boolean(order.archived_at) : !order.archived_at)
     .filter((order: any) => {
       const customer = `${order.profiles?.first_name ?? ""} ${order.profiles?.last_name ?? ""} ${order.profiles?.email ?? ""}`.toLowerCase();
-      return !search.trim() || String(order.order_number ?? "").includes(search.trim()) || customer.includes(search.trim().toLowerCase());
+      return !search.trim() || String(order.order_reference ?? "").toLowerCase().includes(search.trim().toLowerCase()) || customer.includes(search.trim().toLowerCase());
     })
     .filter((order: any) => paymentFilter === "all" || (order.payment_status ?? "awaiting_payment") === paymentFilter)
-    .filter((order: any) => statusFilter === "all" || order.status === statusFilter)
+    .filter((order: any) => statusFilter === "all" || order.status === statusFilter || (statusFilter === "pending" && order.status === "paid"))
     .filter((order: any) => methodFilter === "all" || order.payment_method === methodFilter)
     .sort((a: any, b: any) => sort === "oldest" ? +new Date(a.created_at) - +new Date(b.created_at) : sort === "highest" ? b.total_cents - a.total_cents : sort === "lowest" ? a.total_cents - b.total_cents : +new Date(b.created_at) - +new Date(a.created_at)), [orders, view, search, paymentFilter, statusFilter, methodFilter, sort]);
   const runBulk = async (action: "archive" | "delete") => {
@@ -2030,9 +2029,9 @@ function AdminOrders({ orders, refresh, refreshEmails, note }: any) {
     {releaseError && <p role="alert">{releaseError}</p>}
     <div className="order-controls">
       <div className="order-view-tabs"><button className={view === "active" ? "selected" : ""} onClick={() => { setView("active"); setSelected([]); }}>Active orders</button><button className={view === "archived" ? "selected" : ""} onClick={() => { setView("archived"); setSelected([]); }}>Archived orders</button></div>
-      <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search order number or customer" />
+      <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search BL reference or customer" />
       <select value={paymentFilter} onChange={(event) => setPaymentFilter(event.target.value)}><option value="all">All payment statuses</option><option value="awaiting_payment">Awaiting Payment</option><option value="paid">Paid</option><option value="cancelled">Cancelled</option></select>
-      <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">All order statuses</option>{["pending", "paid", "fulfilled", "cancelled", "refunded"].map((status) => <option value={status} key={status}>{orderStatusLabel(status)}</option>)}</select>
+      <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">All order statuses</option>{["pending", "processing", "shipped", "delivered", "fulfilled", "cancelled", "refunded"].map((status) => <option value={status} key={status}>{orderStatusLabel(status)}</option>)}</select>
       <select value={methodFilter} onChange={(event) => setMethodFilter(event.target.value)}><option value="all">All payment methods</option><option value="manual_whatsapp">WhatsApp</option><option value="manual_email">Email</option></select>
       <select value={sort} onChange={(event) => setSort(event.target.value)}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="highest">Highest total</option><option value="lowest">Lowest total</option></select>
     </div>
@@ -2048,17 +2047,18 @@ function AdminOrders({ orders, refresh, refreshEmails, note }: any) {
       };
       return <article className="order-card" key={o.id}>
         {expiredReservation(o, now) && <p role="status"><strong>Unpaid reservation expired</strong> - review payment, then cancel and restore stock below. No automatic cancellation has occurred.</p>}
-        <header className="order-card-header"><label className="order-select"><input type="checkbox" checked={selected.includes(o.id)} onChange={() => toggleSelected(o.id)} /><span className="sr-only">Select order #{o.order_number}</span></label><div><p>Order reference</p><h2>#{o.order_number ?? o.id.slice(0, 8)}</h2></div><span className={`status-badge payment-${o.payment_status ?? "awaiting_payment"}`}>Payment: {paymentStatusLabel(o.payment_status)}</span></header>
+        <header className="order-card-header"><label className="order-select"><input type="checkbox" checked={selected.includes(o.id)} onChange={() => toggleSelected(o.id)} /><span className="sr-only">Select order {o.order_reference}</span></label><div><p>Order reference</p><h2>{o.order_reference}</h2></div><span className={`status-badge payment-${o.payment_status ?? "awaiting_payment"}`}>Payment: {paymentStatusLabel(o.payment_status)}</span></header>
         <div className="order-meta"><div><span>Customer</span><b>{customerName}</b><small>{o.profiles?.email ?? "No email available"}</small></div><div><span>Date</span><b>{new Date(o.created_at).toLocaleString("en-CA")}</b></div><div><span>Total</span><b>{orderMoney(o.total_cents, o.currency ?? "CAD")}</b></div><div><span>Payment method</span><b>{paymentMethodLabel(o.payment_method)}</b></div></div>
         <div className="order-products"><h3>Products</h3><ul>{o.order_items?.map((item: any) => <li key={`${o.id}-${item.product_name}-${item.shade ?? "standard"}`}><b>{item.product_name}</b>{item.shade && <span>Options: {item.shade}</span>}<span>Quantity: {item.quantity} · {orderMoney(item.unit_price_cents, o.currency ?? "CAD")} each · Subtotal: {orderMoney(item.unit_price_cents * item.quantity, o.currency ?? "CAD")}</span></li>)}</ul></div>
+        <OrderProgress order={o} />
         {detailId === o.id && <div className="order-detail"><div><span>Delivery</span><b>{[address.address, address.unit, `${address.city ?? ""}${address.province ? `, ${address.province}` : ""}`, address.postal_code, address.country].filter(Boolean).join(" · ")}</b><small>{address.phone ? `Phone: ${address.phone}` : ""}</small></div><div><span>Payment</span><b>{paymentMethodLabel(o.payment_method)} · {paymentStatusLabel(o.payment_status)}</b><small>{o.paid_at ? `Paid: ${new Date(o.paid_at).toLocaleString("en-CA")}` : o.payment_expires_at ? `Payment requested before: ${new Date(o.payment_expires_at).toLocaleString("en-CA")}` : "Not yet paid"}</small></div><div><span>Email notifications</span><b>Order email: {orderEmail?.status ?? "not sent"}</b><small>{o.payment_status === "paid" ? `Payment email: ${paymentEmail?.status ?? "not sent"}` : "Payment email is sent only after payment confirmation."}</small></div><div><span>Inventory</span><b>{o.inventory_reservation_status === "reserved" ? "Reserved for this unpaid order" : o.inventory_reservation_status === "restored" ? "Restored to stock" : o.inventory_reservation_status === "committed" ? "Committed to paid order" : "Legacy order — not tracked"}</b><small>{o.inventory_restored_at ? `Restored: ${new Date(o.inventory_restored_at).toLocaleString("en-CA")}` : o.cancellation_reason ?? ""}</small></div><div><span>Totals</span><b>Shipping {orderMoney(o.shipping_cents, o.currency ?? "CAD")} · Total {orderMoney(o.total_cents, o.currency ?? "CAD")}</b><small>Order status: {orderStatusLabel(o.status)}</small></div></div>}
-        <div className="order-actions"><button className="product-table-action" onClick={() => setDetailId(detailId === o.id ? null : o.id)}>{detailId === o.id ? "Hide details" : "View details"}</button><div><span>Order status</span><label className="status-select"><span className="sr-only">Order status</span><select disabled={o.inventory_reservation_status === "reserved"} title={o.inventory_reservation_status === "reserved" ? "Confirm payment or cancel and restore stock first." : undefined} value={o.status} onChange={async (event) => { try { await updateOrderStatus(o.id, event.target.value as any); await refresh(); note("Order status updated."); } catch (error) { logOperationFailure("Order status update failed:", error); note("Order status could not be updated."); } }}>{["pending", "paid", "fulfilled", "cancelled", "refunded"].map((status) => <option key={status} value={status}>{orderStatusLabel(status)}</option>)}</select></label></div>
-          {o.payment_status === "awaiting_payment" && <button type="button" className="btn dark order-payment-action" onClick={async () => { if (confirm(`Confirm that you independently verified payment for Order #${o.order_number}?`)) { try { await confirmManualPayment(o.id); await refresh(); try { await sendOrderEmail(o.id, "payment_confirmed"); await refresh(); note("Payment marked as paid and confirmation email sent."); } catch (emailError) { logOperationFailure("Payment confirmation email failed:", emailError); await refresh(); note("Payment is confirmed, but the email could not be sent."); } } catch (error) { logOperationFailure("Payment confirmation failed:", error); note("Payment could not be confirmed."); } } }}>Mark as Paid</button>}
+        <div className="order-actions"><button className="product-table-action" onClick={() => setDetailId(detailId === o.id ? null : o.id)}>{detailId === o.id ? "Hide details" : "View details"}</button><OrderFulfillmentAction order={o} refresh={refresh} />
+          {o.payment_status === "awaiting_payment" && <button type="button" className="btn dark order-payment-action" onClick={async () => { if (confirm(`Confirm that you independently verified payment for Order ${o.order_reference}?`)) { try { await confirmManualPayment(o.id); await refresh(); try { await sendOrderEmail(o.id, "payment_confirmed"); await refresh(); note("Payment marked as paid and confirmation email sent."); } catch (emailError) { logOperationFailure("Payment confirmation email failed:", emailError); await refresh(); note("Payment is confirmed, but the email could not be sent."); } } catch (error) { logOperationFailure("Payment confirmation failed:", error); note("Payment could not be confirmed."); } } }}>Mark as Paid</button>}
           {orderEmail?.status === "failed" && <button type="button" className="product-table-action" onClick={() => void retryEmail("order_created")}>Retry order email</button>}
           {o.payment_status === "paid" && <PaymentConfirmationEmailAction orderId={o.id} paymentStatus={o.payment_status} notification={paymentEmail} refresh={refreshEmails} />}
           {o.payment_status === "awaiting_payment" && o.inventory_reservation_status === "reserved" && <button type="button" className="delete-product product-table-action" disabled={releasing !== null} onClick={() => void releaseReservation(o)}>{releasing === o.id ? "Releasing..." : expiredReservation(o, now) ? "Cancel expired reservation & restore stock" : "Cancel & restore stock"}</button>}
           {view === "active" ? <button className="product-table-action" onClick={async () => { try { await archiveOrders([o.id]); await refresh(); note("Order archived."); } catch (error) { logOperationFailure("Order archive failed:", error); note("Order could not be archived."); } }}>Archive order</button> : <button className="product-table-action restore-product" onClick={async () => { try { await restoreOrder(o.id); await refresh(); note("Order restored."); } catch (error) { logOperationFailure("Order restore failed:", error); note("Order could not be restored."); } }}>Restore order</button>}
-          <button className="delete-product product-table-action" disabled={o.inventory_reservation_status === "reserved"} title={o.inventory_reservation_status === "reserved" ? "Cancel this unpaid order and restore stock before deleting it." : undefined} onClick={async () => { if (confirm(`Permanently delete Order #${o.order_number}? This cannot be undone.`)) { try { await deleteOrders([o.id]); await refresh(); note("Order permanently deleted."); } catch (error) { logOperationFailure("Order deletion failed:", error); note("Order could not be deleted. Cancel unpaid reservations before deletion."); } } }}>Delete order permanently</button></div>
+          <button className="delete-product product-table-action" disabled={o.inventory_reservation_status === "reserved"} title={o.inventory_reservation_status === "reserved" ? "Cancel this unpaid order and restore stock before deleting it." : undefined} onClick={async () => { if (confirm(`Permanently delete Order ${o.order_reference}? This cannot be undone.`)) { try { await deleteOrders([o.id]); await refresh(); note("Order permanently deleted."); } catch (error) { logOperationFailure("Order deletion failed:", error); note("Order could not be deleted. Cancel unpaid reservations before deletion."); } } }}>Delete order permanently</button></div>
       </article>;
     }) : <p>No {view} orders match these filters.</p>}
   </section>;

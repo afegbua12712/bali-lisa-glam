@@ -1,0 +1,17 @@
+.order-fulfillment { min-width: 0; margin-block: 18px; }
+.order-fulfillment p { margin-block: 8px; overflow-wrap: anywhere; }
+.order-progress { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; padding: 0; margin: 14px 0; list-style: none; }
+.order-progress li { display: flex; gap: 8px; min-width: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.order-progress li.complete { color: var(--ink); }
+.order-progress time { display: block; font-size: 11px; color: var(--muted); }
+.order-card-header h2, .customer-orders .order-open b { overflow-wrap: anywhere; }
+.order-card-header > div, .fulfillment-action { min-width: 0; }
+.fulfillment-action button { min-height: 44px; white-space: normal; }
+.fulfillment-action p { max-width: 320px; font-size: 13px; line-height: 1.5; }
+@media (max-width: 1024px) { .order-progress { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 600px) {
+  .order-progress { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .order-card-header { flex-wrap: wrap; }
+  .order-card-header .status-badge { white-space: normal; }
+  .fulfillment-action, .fulfillment-action button { width: 100%; }
+}

@@ -96,7 +96,7 @@ test('product option SQL contract in isolated PostgreSQL', async t => {
     await db.query("update profiles set role='admin' where id=$1", [customer])
     await db.query("update profiles set role='customer' where id=$1", [customer])
     const source = readFileSync(new URL('../src/lib/manual-payment.ts', import.meta.url), 'utf8')
-    assert.match(source, /rpc\('create_manual_order'/)
+    assert.match(source, /rpc\('create_manual_order_with_reference'/)
     assert.match(source, /idempotency_key: idempotencyKey/)
   })
   await t.test('legacy backfill and historical rows preserved', async () => {

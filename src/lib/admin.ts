@@ -81,7 +81,7 @@ export async function uploadProductImage(file: File) {
 }
 
 export async function fetchAdminOrders() {
-  const { data, error } = await supabase.from('orders').select('id,order_number,status,payment_method,payment_status,paid_at,payment_expires_at,inventory_reservation_status,inventory_restored_at,cancellation_reason,archived_at,currency,total_cents,subtotal_cents,shipping_cents,shipping_address,created_at,profiles(email,first_name,last_name),order_items(product_name,shade,quantity,unit_price_cents),order_notifications(event_type,status,last_error,last_attempt_at,sent_at,provider_message_id)').order('created_at', { ascending: false })
+  const { data, error } = await supabase.from('orders').select('id,order_reference,status,processing_at,shipped_at,delivered_at,payment_method,payment_status,paid_at,payment_expires_at,inventory_reservation_status,inventory_restored_at,cancellation_reason,archived_at,currency,total_cents,subtotal_cents,shipping_cents,shipping_address,created_at,profiles(email,first_name,last_name),order_items(product_name,shade,quantity,unit_price_cents),order_notifications(event_type,status,last_error,last_attempt_at,sent_at,provider_message_id)').order('created_at', { ascending: false })
   if (error) throw error
   return data ?? []
 }
@@ -101,8 +101,8 @@ export async function deleteOrders(ids: string[]) {
   if (error) throw error
 }
 
-export async function updateOrderStatus(id: string, status: 'pending'|'paid'|'fulfilled'|'cancelled'|'refunded') {
-  const { error } = await supabase.from('orders').update({ status, updated_at: new Date().toISOString() }).eq('id', id)
+export async function advanceOrderFulfillment(id: string, expectedStatus: string, nextStatus: 'processing' | 'shipped' | 'delivered') {
+  const { error } = await supabase.rpc('advance_order_fulfillment', { target_order_id: id, expected_status: expectedStatus, next_status: nextStatus })
   if (error) throw error
 }
 

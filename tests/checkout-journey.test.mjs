@@ -55,9 +55,9 @@ test('contact validation rejects missing or unsafe channels; handoff links encod
   assert.equal(journey.paymentContact({ whatsapp_number: 'javascript:12345678' }, 'manual_whatsapp'), undefined)
   for (const method of ['manual_email', 'manual_whatsapp']) {
     const contact = journey.paymentContact({ business_email: 'help@example.test', whatsapp_number: '+14165550100' }, method)
-    const link = journey.paymentHref(contact, method, 123, 'Order #123 & details')
-    assert.ok(link.includes(encodeURIComponent('Order #123 & details')))
-    assert.equal(journey.paymentHref(contact, method, 123, 'Order #123 & details'), link)
+    const link = journey.paymentHref(contact, method, 'BL-00123', 'Order BL-00123 & details')
+    assert.ok(link.includes(encodeURIComponent('Order BL-00123 & details')))
+    assert.equal(journey.paymentHref(contact, method, 'BL-00123', 'Order BL-00123 & details'), link)
   }
 })
 
@@ -73,13 +73,13 @@ function harness(overrides = {}) {
     setEmailNotice() {}, setHandoff(value) { state.href = value },
     sessionStorage: { removeItem() {} }, window: { dispatchEvent() {} }, Event,
     supabase: { auth: { getSession: async () => ({ data: { session: {} }, error: null }) } },
-    createManualOrder: async () => { state.creates++; return { order_id: 'synthetic', order_number: 123 } },
+    createManualOrder: async () => { state.creates++; return { order_id: 'synthetic', order_reference: 'BL-00123' } },
     sendOrderEmail: async () => { state.emails++ },
     getManualOrderSummary: async () => {
       state.summaries++
       assert.equal(state.confirmation.order_id, 'synthetic', 'confirmation must exist before summary fetch')
       if (state.failSummary) throw new Error('Synthetic network failure')
-      return { order_number: 123, order_items: [], currency: 'CAD', shipping_cents: 100, total_cents: 1000 }
+      return { order_reference: 'BL-00123', order_items: [], currency: 'CAD', shipping_cents: 100, total_cents: 1000 }
     },
     orderMoney: cents => `CAD ${cents / 100}`,
     ...journey, ...errors, logCheckoutFailure() {}, ...overrides,
@@ -124,6 +124,6 @@ test('created order survives summary failure; retries and repeated handoffs neve
     assert.ok(href.startsWith(method === 'manual_email' ? 'mailto:' : 'https://wa.me/'))
     assert.equal(state.creates, 1)
     assert.equal(state.emails, 1)
-    assert.equal(state.error, '')
+    assert.equal(state.error, ''); assert.ok(decodeURIComponent(href).includes('BL-00123'))
   }
 })
