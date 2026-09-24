@@ -63,7 +63,12 @@ try {
   await call('Page.addScriptToEvaluateOnNewDocument',{source:'localStorage.setItem("blg-recent-products-v1", "[4,2]")'})
   await call('Page.navigate',{url:origin})
   await until('document.querySelectorAll(".product-img").length === 4')
-  if(storefrontMode) {
+  if(process.argv.includes('--header')) {
+    const {runHeaderChecks}=await import('./header-browser-checks.mjs')
+    await runHeaderChecks({call,evaluate,until})
+    assert.deepEqual(errors,[])
+    assert.ok(requests.every(r=>['GET','OPTIONS'].includes(r.method)||(r.method==='POST'&&r.path==='/rest/v1/rpc/product_review_stats')))
+  } else if(storefrontMode) {
     const {runStorefrontChecks}=await import('./storefront-browser-checks.mjs')
     await runStorefrontChecks({call,evaluate,until,output,original,setCatalog:value=>{rows=value},setFailure:value=>{failCatalog=value}})
   } else {

@@ -1,5 +1,8 @@
 /* Final responsive precedence layer for the mounted storefront. */
-html, body, #root { max-width: 100%; overflow-x: hidden; }
+html, body, #root { max-width: 100%; overflow-x: clip; }
+/* Keep the customer header in flow, below modal overlays (z-index 10+). */
+.app > .header { position: sticky; top: 0; z-index: 4; }
+html { scroll-padding-top: 90px; }
 .product-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .product-info > div { min-width: 0; }
 .product-info button { display: block; overflow-wrap: normal; word-break: normal; hyphens: none; line-height: 1.28; }
