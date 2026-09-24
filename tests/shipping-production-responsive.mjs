@@ -12,7 +12,7 @@ import { read, fixture, views, compile, viewSource } from './order-view-fixtures
 const output=resolve('node_modules/.tmp/shipping-production-browser')
 await mkdir(output,{recursive:true})
 const {CustomerOrders,AdminOrders}=views(true)
-const {AdminSettings}=compile('export '+viewSource('AdminSettings'))
+const {AdminSettings}=compile("import {useState,useRef} from 'react'; export "+viewSource('AdminSettings'))
 const css=['index.css','App.css','readability.css','mobile.css','product-options.css','appearance.css','layout-spacing.css','product-media-reviews.css','order-fulfillment.css'].map(f=>read('src/'+f)).join('\n').replace(/^@import.*$/gm,'')
 const server=createServer((req,res)=>{
   const url=new URL(req.url,'http://localhost');const view=url.searchParams.get('view'),status=url.searchParams.get('status')??'processing'

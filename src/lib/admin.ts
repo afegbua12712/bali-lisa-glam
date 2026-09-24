@@ -12,11 +12,23 @@ export type AdminProductInput = {
   images: ProductImage[]
 }
 
+// Load complete operational lists rather than silently stopping at the API row cap.
+async function adminPages<T>(page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>) {
+  const rows: T[] = []
+  for (let from = 0; ; from += 500) {
+    const { data, error } = await page(from, from + 499)
+    if (error) throw error
+    rows.push(...(data ?? []))
+    if (!data || data.length < 500) return rows
+  }
+}
+
 export async function fetchAdminProducts(query = '') {
+  const data = await adminPages(async (from, to) => {
   let request = supabase.from('products').select('id,name,slug,description,price_cents,inventory_quantity,is_active,image_url,shades,created_at,categories(id,name),product_images(id,url,alt_text,display_order,option_value_id),product_option_groups(id,name,display_order,required,product_option_values(id,label,display_order,active,color))').order('created_at', { ascending: false })
   if (query.trim()) request = request.ilike('name', `%${query.trim()}%`)
-  const { data, error } = await request
-  if (error) throw error
+  return await request.order('id').range(from, to)
+  })
   return (data ?? []).map(product => ({ ...product, images: productImages(product.product_images, product.image_url).map(image => ({ ...image, id: image.id === 'legacy' ? crypto.randomUUID() : image.id })), options: normalizeOptions(product.product_option_groups) }))
 }
 
@@ -81,9 +93,7 @@ export async function uploadProductImage(file: File) {
 }
 
 export async function fetchAdminOrders() {
-  const { data, error } = await supabase.from('orders').select('id,order_reference,status,shipping_method,shipment_carrier,tracking_number,processing_at,shipped_at,delivered_at,payment_method,payment_status,paid_at,payment_expires_at,inventory_reservation_status,inventory_restored_at,cancellation_reason,archived_at,currency,total_cents,subtotal_cents,shipping_cents,shipping_address,created_at,profiles(email,first_name,last_name),order_items(product_name,shade,quantity,unit_price_cents),order_notifications(event_type,status,last_error,last_attempt_at,sent_at,provider_message_id)').order('created_at', { ascending: false })
-  if (error) throw error
-  return data ?? []
+  return adminPages(async (from, to) => supabase.from('orders').select('id,customer_id,order_reference,status,shipping_method,shipment_carrier,tracking_number,processing_at,shipped_at,delivered_at,payment_method,payment_status,paid_at,payment_expires_at,inventory_reservation_status,inventory_restored_at,cancellation_reason,archived_at,currency,total_cents,subtotal_cents,shipping_cents,shipping_address,created_at,profiles(email,first_name,last_name),order_items(product_name,shade,quantity,unit_price_cents),order_notifications(event_type,status,last_error,last_attempt_at,sent_at,provider_message_id)').order('created_at', { ascending: false }).order('id').range(from, to))
 }
 
 export async function archiveOrders(ids: string[]) {
@@ -117,9 +127,7 @@ export async function cancelUnpaidOrder(id: string, reason = 'Cancelled by admin
 }
 
 export async function fetchCustomers() {
-  const { data, error } = await supabase.from('profiles').select('id,email,first_name,last_name,role,created_at,orders(total_cents)').order('created_at', { ascending: false })
-  if (error) throw error
-  return data ?? []
+  return adminPages(async (from, to) => supabase.from('profiles').select('id,email,first_name,last_name,phone,role,created_at').order('created_at', { ascending: false }).order('id').range(from, to))
 }
 
 export async function getSettings() {

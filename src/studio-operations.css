@@ -1,0 +1,30 @@
+.admin .stats { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.admin .stat, .studio-customers article, .studio-recent > div { min-width: 0; overflow-wrap: anywhere; }
+.admin .stat b { font-size: clamp(24px, 3vw, 34px); }
+.admin .stat small { line-height: 1.5; }
+.studio-recent > div { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; padding-block: 16px; border-bottom: 1px solid var(--line); }
+.studio-customers article { padding: 20px 0; border-bottom: 1px solid var(--line); }
+.studio-customers h2 { font: 600 24px var(--serif); }
+.studio-customers p { line-height: 1.6; }
+.studio-customers label, .product-inventory > label { display: grid; gap: 8px; margin-block: 16px; }
+.studio-customers input, .product-inventory > label select { width: 100%; max-width: 480px; min-height: 44px; padding: 10px; background: var(--cream); color: var(--ink); border: 1px solid var(--line); }
+.studio-stock { display: block; margin-top: 6px; }
+.admin :is(button,input,select):focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+.admin button { min-height: 44px; }
+.admin button:disabled { opacity: .55; cursor: not-allowed; }
+@media (min-width: 961px) and (max-width: 1500px) {
+  .admin .product-table-head { display: none; }
+  .admin .product-table-row { display: block; padding: 20px; }
+  .admin .product-table-row > div { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 14px; padding: 8px 0; align-items: center; }
+  .admin .product-table-row > div::before { content: attr(data-label); color: var(--muted); font-size: 12px; font-weight: 700; }
+  .admin .product-table-row .table-product { display: flex; }
+  .admin .product-table-row .table-product::before { content: none; }
+}
+@media (max-width: 767px) {
+  .admin .admin-nav { display: flex; flex-wrap: wrap; position: static; width: 100%; gap: 6px; padding: 14px; }
+  .admin .admin-nav > .wordmark, .admin .admin-nav > p { display: none; }
+  .admin .admin-nav > button { flex: 1 0 28%; padding: 10px 6px; text-align: center; }
+  .admin { display: block; }
+  .admin .admin-main { width: 100%; min-width: 0; padding: 20px 16px; }
+  .admin .stats { grid-template-columns: minmax(0, 1fr); }
+}

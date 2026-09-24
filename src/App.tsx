@@ -1,3 +1,5 @@
+import { studioMetrics, filterStudioProducts, customerActivity } from "./lib/studio-operations";
+import "./studio-operations.css";
 import { ShipmentDetails } from "./ShipmentDetails";
 import { ShipmentEmailAction } from "./ShipmentEmailAction";
 import { OrderProgress } from "./OrderProgress";
@@ -37,7 +39,7 @@ import { applyMetadata, metadataFor, pageFromHash, type SeoView } from "./lib/se
 import { ProductOptionSelectors } from "./ProductOptionSelectors";
 import { cartLineKey, cartQuantity, optionSummary, selectProductOptions, validateOptionEditor, type OptionGroup, type OptionSelection } from "./lib/product-options";
 import { supabase } from "./lib/supabase";
-import { createOrder, fetchProducts, getAdminMetrics, getProfile } from "./lib/store";
+import { createOrder, fetchProducts, getProfile } from "./lib/store";
 import {
   archiveProduct,
   archiveOrders,
@@ -1647,7 +1649,6 @@ function Admin({ note }: any) {
   const [active, setActive] = useState("Overview"),
     [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
-    [metrics, setMetrics] = useState<any>(null),
     [adminProducts, setAdminProducts] = useState<any[]>([]),
     [orders, setOrders] = useState<any[]>([]),
     [customers, setCustomers] = useState<any[]>([]),
@@ -1657,32 +1658,36 @@ function Admin({ note }: any) {
     [uploadingImage, setUploadingImage] = useState(false),
     [editorError, setEditorError] = useState(""),
     [query, setQuery] = useState("");
+  const loadGeneration = useRef(0);
+  const metrics = useMemo(() => studioMetrics(adminProducts, orders, customers), [adminProducts, orders, customers]);
   const load = async () => {
+    const generation = ++loadGeneration.current;
     setLoading(true);
     setError("");
     try {
-      const [m, p, o, c, cs, s] = await Promise.all([
-        getAdminMetrics(),
-        fetchAdminProducts(query),
+      const [p, o, c, cs, s] = await Promise.all([
+        fetchAdminProducts(),
         fetchAdminOrders(),
         fetchCustomers(),
         fetchAdminCategories(),
         getSettings(),
       ]);
-      setMetrics(m);
+      if (generation !== loadGeneration.current) return;
       setAdminProducts(p);
       setOrders(o);
       setCustomers(c);
       setCategories(cs);
       setSettings(s);
     } catch {
+      if (generation !== loadGeneration.current) return;
       setError("Studio data could not be loaded. Please refresh and try again.");
     } finally {
-      setLoading(false);
+      if (generation === loadGeneration.current) setLoading(false);
     }
   };
   useEffect(() => {
     void load();
+    return () => { loadGeneration.current++; };
   }, []);
   useEffect(() => {
     if (!editing) return;
@@ -1753,7 +1758,8 @@ function Admin({ note }: any) {
         <header>
           <div>
             <p className="eyebrow">{active.toUpperCase()}</p>
-            <h1>{active === "Overview" ? "Good morning, Lisa." : active}</h1>
+            <h1>{active === "Overview" ? "Studio overview" : active}</h1>
+            <button type="button" className="text" disabled={loading || Boolean(editing)} onClick={() => void load()}>Refresh Studio</button>
           </div>
           {active === "Products" && (
             <button
@@ -1781,7 +1787,7 @@ function Admin({ note }: any) {
           )}
         </header>
         {loading ? (
-          <p>Loading Studio data…</p>
+          <p role="status">Loading Studio data…</p>
         ) : error ? (
           <div className="empty">
             <h3>{error}</h3>
@@ -1792,6 +1798,8 @@ function Admin({ note }: any) {
         ) : active === "Overview" ? (
           <AdminOverview
             metrics={metrics}
+            orders={orders}
+            openOrders={() => setActive("Orders")}
             products={adminProducts}
             openProducts={() => setActive("Products")}
           />
@@ -1808,15 +1816,15 @@ function Admin({ note }: any) {
             }}
             archive={async (id: number) => {
               if (confirm("Archive this product? It will remain in order history.")) {
-                await archiveProduct(id);
-                await load();
-                note("Product archived.");
+                try { await archiveProduct(id); await load(); window.dispatchEvent(new Event("blg:catalog-updated")); note("Product archived."); }
+                catch { note("Product could not be archived. Refresh Studio and try again."); }
               }
             }}
             restore={async (id: number) => {
               try {
                 await restoreProduct(id);
                 await load();
+                window.dispatchEvent(new Event("blg:catalog-updated"));
                 note("Product restored to the store.");
               } catch (restoreError) {
                 logOperationFailure("Studio product restore failed:", restoreError);
@@ -1828,6 +1836,7 @@ function Admin({ note }: any) {
                 try {
                   await deleteAdminProduct(product.id);
                   await load();
+                  window.dispatchEvent(new Event("blg:catalog-updated"));
                   note("Product permanently deleted.");
                 } catch (deleteError) {
                   logOperationFailure("Studio product deletion failed:", deleteError);
@@ -1841,7 +1850,7 @@ function Admin({ note }: any) {
         ) : active === "Reviews" ? (
           <AdminReviews />
         ) : active === "Customers" ? (
-          <AdminCustomers customers={customers} />
+          <AdminCustomers customers={customers} orders={orders} />
         ) : (
           <AdminSettings
             settings={settings}
@@ -1940,28 +1949,33 @@ function Admin({ note }: any) {
     </section>
   );
 }
-function AdminOverview({ metrics, products, openProducts }: any) {
+function AdminOverview({ metrics, products, orders, openProducts, openOrders }: any) {
   return (
     <>
       <div className="stats">
         {[
-          ["Paid revenue", money(metrics?.sales ?? 0)],
-          ["Active orders", String(metrics?.activeOrders?.length ?? 0)],
-          ["Awaiting payment", String(metrics?.awaitingPayment ?? 0)],
-          ["Paid orders", String(metrics?.paidOrders ?? 0)],
-          ["Customers", String(metrics?.customers ?? 0)],
-          ["Active products", String(metrics?.activeProducts ?? 0)],
-          ["Low stock", String(metrics?.lowStock ?? 0)],
+          ["Gross confirmed sales", metrics.totals.length ? metrics.totals.map(([currency, cents]: [string, number]) => orderMoney(cents, currency)).join(" / ") : "CAD $0.00"],
+          ["Total orders", String(metrics.totalOrders)],
+          ["Awaiting payment", String(metrics.awaitingPayment)],
+          ["Paid / committed orders", String(metrics.paidOrders)],
+          ["Processing", String(metrics.processing)],
+          ["Shipped", String(metrics.shipped)],
+          ["Delivered", String(metrics.delivered)],
+          ["Customers", String(metrics.customers)],
+          ["Active products", String(metrics.activeProducts)],
+          ["Low stock (1-5)", String(metrics.lowStock)],
+          ["Out of stock", String(metrics.outOfStock)],
         ].map((x) => (
           <div className="stat" key={x[0]}>
             <span>{x[0]}</span>
             <b>{x[1]}</b>
             <small>
-              {x[0] === "Paid revenue" ? "Confirmed payments only" : "Live Supabase data"}
+              {x[0] === "Gross confirmed sales" ? "Paid + committed; includes shipping, excludes cancelled/refunded. Not net revenue." : "Current stored records, including archived orders"}
             </small>
           </div>
         ))}
       </div>
+      <section className="inventory studio-recent"><h2>Recent orders</h2><button type="button" className="text" onClick={openOrders}>Manage orders</button>{orders.slice(0,5).map((order: any) => <div key={order.id}><strong>{order.order_reference}</strong><span>{orderStatusLabel(order.status)} / {paymentStatusLabel(order.payment_status)}</span><span>{orderMoney(order.total_cents, order.currency ?? "CAD")}</span></div>)}{!orders.length && <p>No orders yet.</p>}</section>
       <section className="inventory">
         <div className="inventory-head">
           <h2>Product inventory</h2>
@@ -1994,14 +2008,27 @@ function AdminOverview({ metrics, products, openProducts }: any) {
   );
 }
 function AdminProducts({ products, query, setQuery, edit, archive, restore, remove }: any) {
+  const [stock, setStock] = useState("all");
+  const [busy, setBusy] = useState(false);
+  const actionLock = useRef(false);
+  const visible = filterStudioProducts(products, query, stock);
+  const act = async (action: () => Promise<void>) => {
+    if (actionLock.current) return;
+    actionLock.current = true; setBusy(true);
+    try { await action(); } finally { actionLock.current = false; setBusy(false); }
+  };
   return (
     <section className="inventory product-inventory">
       <input
         className="product-search"
+        aria-label="Search products by name or category"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Search products"
       />
+      <label>Inventory visibility<select aria-label="Inventory visibility" value={stock} onChange={event => setStock(event.target.value)}><option value="all">All products</option><option value="active">Active products</option><option value="low">Low stock (1-5 available)</option><option value="out">Out of stock</option><option value="archived">Archived products</option></select></label>
+      <p role="status">{visible.length} products{busy ? " - Updating..." : ""}</p>
+      {!visible.length && <p>No products match. <button type="button" onClick={() => { setQuery(""); setStock("all"); }}>Clear search and filters</button></p>}
       <div className="product-table-head">
         <span>PRODUCT</span>
         <span>CATEGORY</span>
@@ -2012,7 +2039,7 @@ function AdminProducts({ products, query, setQuery, edit, archive, restore, remo
         <span>STORE VISIBILITY</span>
         <span>DELETE</span>
       </div>
-      {products.map((p: any) => (
+      {visible.map((p: any) => (
         <article className="product-table-row" key={p.id}>
           <div className="table-product" data-label="Product">
             <img src={p.image_url} alt="" />
@@ -2026,11 +2053,11 @@ function AdminProducts({ products, query, setQuery, edit, archive, restore, remo
               {p.is_active ? "Active" : "Archived"}
             </span>
           </div>
-          <div data-label="In stock">{p.inventory_quantity}</div>
+          <div data-label="In stock">{p.inventory_quantity}<small className="studio-stock">{!p.is_active ? "Archived" : p.inventory_quantity <= 0 ? "Out of stock" : p.inventory_quantity <= 5 ? "Low stock" : "Available"}</small></div>
           <div data-label="Price">{money(p.price_cents / 100)}</div>
           <div data-label="Edit">
             <button
-              className="product-table-action"
+              className="product-table-action" disabled={busy}
               onClick={() =>
                 edit({ ...p, category_id: p.categories?.id, shades: p.shades ?? ["Universal"] })
               }
@@ -2040,17 +2067,17 @@ function AdminProducts({ products, query, setQuery, edit, archive, restore, remo
           </div>
           <div data-label="Store visibility">
             {p.is_active ? (
-              <button className="product-table-action" onClick={() => archive(p.id)}>
+              <button className="product-table-action" disabled={busy} onClick={() => void act(() => archive(p.id))}>
                 Remove from store
               </button>
             ) : (
-              <button className="product-table-action restore-product" onClick={() => restore(p.id)}>
+              <button className="product-table-action restore-product" disabled={busy} onClick={() => void act(() => restore(p.id))}>
                 Restore to store
               </button>
             )}
           </div>
           <div data-label="Delete">
-            <button className="delete-product product-table-action" onClick={() => remove(p)}>
+            <button className="delete-product product-table-action" disabled={busy} onClick={() => void act(() => remove(p))}>
               Delete product
             </button>
           </div>
@@ -2125,11 +2152,11 @@ function AdminOrders({ orders, refresh, refreshEmails, note }: any) {
     {releaseError && <p role="alert">{releaseError}</p>}
     <div className="order-controls">
       <div className="order-view-tabs"><button className={view === "active" ? "selected" : ""} onClick={() => { setView("active"); setSelected([]); }}>Active orders</button><button className={view === "archived" ? "selected" : ""} onClick={() => { setView("archived"); setSelected([]); }}>Archived orders</button></div>
-      <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search BL reference or customer" />
-      <select value={paymentFilter} onChange={(event) => setPaymentFilter(event.target.value)}><option value="all">All payment statuses</option><option value="awaiting_payment">Awaiting Payment</option><option value="paid">Paid</option><option value="cancelled">Cancelled</option></select>
-      <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">All order statuses</option>{["pending", "processing", "shipped", "delivered", "fulfilled", "cancelled", "refunded"].map((status) => <option value={status} key={status}>{orderStatusLabel(status)}</option>)}</select>
-      <select value={methodFilter} onChange={(event) => setMethodFilter(event.target.value)}><option value="all">All payment methods</option><option value="manual_whatsapp">WhatsApp</option><option value="manual_email">Email</option></select>
-      <select value={sort} onChange={(event) => setSort(event.target.value)}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="highest">Highest total</option><option value="lowest">Lowest total</option></select>
+      <input aria-label="Search orders by BL reference or customer" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search BL reference or customer" />
+      <select aria-label="Filter payment status" value={paymentFilter} onChange={(event) => setPaymentFilter(event.target.value)}><option value="all">All payment statuses</option><option value="awaiting_payment">Awaiting Payment</option><option value="paid">Paid</option><option value="cancelled">Cancelled</option></select>
+      <select aria-label="Filter fulfillment status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">All order statuses</option>{["pending", "processing", "shipped", "delivered", "fulfilled", "cancelled", "refunded"].map((status) => <option value={status} key={status}>{orderStatusLabel(status)}</option>)}</select>
+      <select aria-label="Filter payment method" value={methodFilter} onChange={(event) => setMethodFilter(event.target.value)}><option value="all">All payment methods</option><option value="manual_whatsapp">WhatsApp</option><option value="manual_email">Email</option></select>
+      <select aria-label="Sort orders" value={sort} onChange={(event) => setSort(event.target.value)}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="highest">Highest total</option><option value="lowest">Lowest total</option></select>
     </div>
     {selected.length > 0 && <div className="order-bulk-actions"><b>{selected.length} selected</b>{view === "active" && <button disabled={busy} onClick={() => void runBulk("archive")}>Archive selected</button>}<button className="delete-product" disabled={busy || selectedIncludesReservedOrder} title={selectedIncludesReservedOrder ? "Cancel unpaid reservations and restore stock before deleting them." : undefined} onClick={() => void runBulk("delete")}>Delete selected permanently</button></div>}
     {visibleOrders.length ? visibleOrders.map((o: any) => {
@@ -2159,39 +2186,28 @@ function AdminOrders({ orders, refresh, refreshEmails, note }: any) {
     }) : <p>No {view} orders match these filters.</p>}
   </section>;
 }
-function AdminCustomers({ customers }: any) {
-  return (
-    <section className="inventory">
-      {customers.length ? (
-        customers.map((c: any) => (
-          <div className="table-row" key={c.id}>
-            <span>
-              <b>{[c.first_name, c.last_name].filter(Boolean).join(" ") || "Customer"}</b>
-              <small>{c.email}</small>
-            </span>
-            <span>{c.role}</span>
-            <span>{c.orders?.length ?? 0} orders</span>
-            <span>
-              {money(
-                (c.orders ?? []).reduce((sum: number, o: any) => sum + o.total_cents, 0) / 100,
-              )}
-            </span>
-          </div>
-        ))
-      ) : (
-        <p>No customers yet.</p>
-      )}
-    </section>
-  );
+function AdminCustomers({ customers, orders }: any) {
+  const [search, setSearch] = useState("");
+  const visible = customers.filter((c: any) => [c.first_name,c.last_name,c.email,c.phone].filter(Boolean).join(" ").toLowerCase().includes(search.trim().toLowerCase()));
+  return <section className="inventory studio-customers"><label>Search customers<input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Name, email or phone" /></label><p role="status">{visible.length} accounts</p>
+    {visible.map((c: any) => { const activity = customerActivity(c.id, orders); return <article key={c.id}><h2>{[c.first_name,c.last_name].filter(Boolean).join(" ") || "Customer"}</h2><p>{c.email}</p>{c.phone && <p>Phone: {c.phone}</p>}<p>Account type: {c.role}</p><p>Joined: {c.created_at ? new Date(c.created_at).toLocaleDateString("en-CA") : "Unavailable"}</p><p>{activity.count} orders</p><p>Gross confirmed spend: {activity.totals.length ? activity.totals.map(([currency,cents]) => orderMoney(cents,currency)).join(" / ") : "None"}</p><p>Latest order: {activity.latest ? new Date(activity.latest).toLocaleDateString("en-CA") : "No orders"}</p></article>; })}
+    {!visible.length && <p>No matching accounts.{search && <button type="button" onClick={() => setSearch("")}>Clear search</button>}</p>}
+    <p>Confirmed spend includes shipping on paid, committed orders; cancelled/refunded orders are excluded. No payment or authentication credentials are shown.</p>
+  </section>;
 }
 function AdminSettings({ settings, setSettings, save }: any) {
+  const lock = useRef(false);
+  const [busy, setBusy] = useState(false), [error, setError] = useState("");
   if (!settings) return <p>No settings found.</p>;
   return (
     <form
       className="account-card"
-      onSubmit={(e) => {
+      onSubmit={async (e) => {
         e.preventDefault();
-        void save();
+        if (lock.current) return;
+        lock.current = true; setBusy(true); setError("");
+        try { await save(); } catch { setError("Settings could not be saved. Your edits are retained; verify your connection and try again."); }
+        finally { lock.current = false; setBusy(false); }
       }}
     >
       {[
@@ -2207,6 +2223,7 @@ function AdminSettings({ settings, setSettings, save }: any) {
         <label key={key}>
           {label}
           <input
+            disabled={busy}
             type={key.includes("cents") ? "number" : "text"}
             min={key.includes("cents") ? 0 : undefined}
             step={key.includes("cents") ? 1 : undefined}
@@ -2224,7 +2241,8 @@ function AdminSettings({ settings, setSettings, save }: any) {
           />
         </label>
       ))}
-      <button className="btn dark">Save settings</button>
+      {error && <p role="alert">{error}</p>}
+      <button className="btn dark" disabled={busy}>{busy ? "Saving..." : "Save settings"}</button>
     </form>
   );
 }
