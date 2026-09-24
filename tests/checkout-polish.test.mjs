@@ -24,17 +24,17 @@ test('desktop and mobile Studio links require the resolved admin role',()=>{
 })
 
 test('auth loading hides Studio, accepts multiple admin identities and ignores stale admin responses',async()=>{
-  const requests=[];let listener;let timer;let admin=false;let user;let customerId=null
-  const context={setCustomerId:v=>{customerId=typeof v==='function'?v(customerId):v},useEffect:fn=>fn(),getProfile:()=>new Promise((resolve,reject)=>requests.push({resolve,reject})),setUser:v=>{user=v},setIsAdmin:v=>{admin=v},setTimeout:fn=>{timer=fn;return 1},clearTimeout:()=>{timer=undefined},supabase:{auth:{onAuthStateChange:fn=>{listener=fn;return {data:{subscription:{unsubscribe(){}}}}}}},window:{location:{hash:'',search:''}},URLSearchParams}
+  const requests=[];let listener;let timer;let admin=false;let user;let customerId=null;let authReady=false
+  const context={setAuthReady:v=>{authReady=v},setCustomerId:v=>{customerId=typeof v==='function'?v(customerId):v},useEffect:fn=>fn(),getProfile:()=>new Promise((resolve,reject)=>requests.push({resolve,reject})),setUser:v=>{user=v},setIsAdmin:v=>{admin=v},setTimeout:fn=>{timer=fn;return 1},clearTimeout:()=>{timer=undefined},supabase:{auth:{onAuthStateChange:fn=>{listener=fn;return {data:{subscription:{unsubscribe(){}}}}}}},window:{location:{hash:'',search:''}},URLSearchParams}
   const js=ts.transpileModule(authEffect,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText
   new Function(...Object.keys(context),js)(...Object.values(context))
   assert.equal(admin,false)
   const settle=async(profile,id)=>{requests.shift().resolve({user:id?{id,email:id+'@example.test'}:null,profile});await Promise.resolve()}
-  await settle(null,null);assert.equal(admin,false)
+  await settle(null,null);assert.equal(admin,false);assert.equal(authReady,true)
   for(const [index,role] of ['customer','admin','admin'].entries()) {
     const id='identity-'+index
-    listener('SIGNED_IN',{user:{id,email:id+'@example.test'}});assert.equal(admin,false);assert.equal(customerId,null);timer()
-    await settle({id,role},id);assert.equal(admin,role==='admin');assert.equal(customerId,id)
+    listener('SIGNED_IN',{user:{id,email:id+'@example.test'}});assert.equal(admin,false);assert.equal(customerId,null);assert.equal(authReady,false);timer()
+    await settle({id,role},id);assert.equal(admin,role==='admin');assert.equal(customerId,id);assert.equal(authReady,true)
   }
   listener('SIGNED_IN',{user:{id:'old-admin'}});timer()
   listener('SIGNED_OUT',null);await settle({id:'old-admin',role:'admin'},'old-admin')

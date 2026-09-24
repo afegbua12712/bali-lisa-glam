@@ -8,7 +8,6 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
-  Heart,
   Menu,
   Minus,
   Package,
@@ -60,7 +59,11 @@ import {
   getManualOrderSummary,
   getPublicPaymentSettings,
 } from "./lib/manual-payment";
-import { getCustomerAccount, getCustomerDelivery, getReorderItems, saveCustomerAddress, saveCustomerProfile, toggleWishlist } from "./lib/customer";
+import { getCustomerAccount, getCustomerDelivery, getReorderItems, saveCustomerAddress, saveCustomerProfile } from "./lib/customer";
+import { FavoriteButton } from "./FavoriteButton";
+import { useFavorites, type Favorites } from "./useFavorites";
+import { readRecent, rememberProduct, recentProducts, relatedProducts, RECENT_KEY } from "./lib/discovery";
+import "./discovery.css";
 import { planReorder } from "./lib/reorder";
 import { clearAuthCallbackUrl, friendlyAuthError, getAuthRedirectUrl, isAuthRateLimited } from "./lib/auth";
 import { sendOrderEmail } from "./lib/order-email";
@@ -147,6 +150,10 @@ export default function App() {
       readSavedCart({ getItem: key => sessionStorage.getItem(key) }),
     ),
     [catalogVersion, setCatalogVersion] = useState(0);
+  const [authReady, setAuthReady] = useState(false);
+  const favorites = useFavorites(customerId, authReady);
+  const [recent, setRecent] = useState(() => readRecent({ getItem: key => localStorage.getItem(key) }));
+  const [catalogState, setCatalogState] = useState<"loading" | "ready" | "error">("loading");
   const [reviewReturn, setReviewReturn] = useState(false);
   const requestCheckoutSignIn = () => { sessionStorage.setItem("blg-checkout-return", "true"); setUser(null); go("account"); };
   useEffect(() => {
@@ -216,6 +223,16 @@ export default function App() {
     setActive(p);
     go("product");
   };
+  useEffect(() => {
+    if (page !== "product" || !active || catalogState !== "ready" || !products.some(p => p.id === active.id)) return;
+    setRecent(previous => {
+      const next = rememberProduct(previous, active.id);
+      try { localStorage.setItem(RECENT_KEY, JSON.stringify(next)); } catch { /* Browsing still works without storage. */ }
+      return next;
+    });
+  }, [page, active, catalogState]);
+  const favoriteSignIn = (p: Product) => { setActive(p); setReviewReturn(true); go("account"); };
+  const discovery = { favorites, favoriteSignIn };
   const latestBag = useRef(cart);
   const reorderOwner = useRef(customerId);
   const reorderLock = useRef(false);
@@ -262,14 +279,15 @@ export default function App() {
   }, [category, query, sort, catalogVersion]);
   useEffect(() => {
     let alive = true;
-    const refreshCatalog = () => { void fetchProducts()
+    const refreshCatalog = () => { setCatalogState("loading"); void fetchProducts()
       .then((data) => {
         if (alive) {
           products.splice(0, products.length, ...data);
           setCatalogVersion((v) => v + 1);
+          setCatalogState("ready");
         }
       })
-      .catch(() => note("The collection is temporarily unavailable.")); };
+      .catch(() => { if (alive) setCatalogState("error"); }); };
     refreshCatalog();
     window.addEventListener("blg:catalog-updated", refreshCatalog);
     return () => {
@@ -304,11 +322,13 @@ export default function App() {
         if (expectedUserId && authUser?.id !== expectedUserId) return;
         setUser(authUser?.email ?? null);
         setCustomerId(authUser?.id ?? null);
+        setAuthReady(true);
         setIsAdmin(Boolean(authUser && profile?.id === authUser.id && profile.role === "admin"));
       } catch {
         if (!alive || request !== generation) return;
         setUser(null);
         setCustomerId(null);
+        setAuthReady(true);
         setIsAdmin(false);
       }
     };
@@ -321,6 +341,7 @@ export default function App() {
       const request = ++generation;
       setIsAdmin(false);
       setUser(session?.user.email ?? null);
+      setAuthReady(!session?.user);
       // Retain an already verified identity on token refresh; a different account
       // must finish getProfile/getUser before its checkout draft can be displayed.
       setCustomerId(current => current === session?.user.id ? current : null);
@@ -414,6 +435,7 @@ export default function App() {
         </div>
       )}
       <main>
+        {["home", "shop", "product"].includes(page) && catalogState !== "ready" && <div className="discovery-status" role={catalogState === "error" ? "alert" : "status"}>{catalogState === "loading" ? "Loading the collection…" : <>The collection is temporarily unavailable. <button onClick={() => window.dispatchEvent(new Event("blg:catalog-updated"))}>Try again</button></>}</div>}
         {page === "not-found" && <section className="support-page" aria-labelledby="not-found-title">
           <p className="eyebrow">Bali &amp; Lisa Glam</p>
           <h1 id="not-found-title">Page not found</h1>
@@ -423,6 +445,7 @@ export default function App() {
         {Object.hasOwn(supportTitles, page) && <SupportPageView key={page} page={page as SupportPage} />}
         {page === "home" && (
           <Home
+            {...discovery}
             shop={() => go("shop")}
             story={() => go("story")}
             show={show}
@@ -436,6 +459,7 @@ export default function App() {
         )}{" "}
         {page === "shop" && (
           <Shop
+            {...discovery}
             items={items}
             category={category}
             setCategory={setCategory}
@@ -458,9 +482,11 @@ export default function App() {
           />
         )}{" "}
         {page === "product" && active && (
-          <Detail key={active.id} bag={cart} product={products.find(p => p.id === active.id) ?? active} back={() => go("shop")} add={add} signedIn={Boolean(user)} signIn={() => { setReviewReturn(true); go("account"); }} />
+          <Detail {...discovery} key={active.id} bag={cart} product={products.find(p => p.id === active.id) ?? active} back={() => go("shop")} add={add} signedIn={Boolean(user)} signIn={() => { setReviewReturn(true); go("account"); }} />
         )}{" "}
-        {page === "account" && <Account key={customerId ?? "signed-out"} user={user} setUser={setUser} note={note} add={add} reorder={reorder} goShop={() => go("shop")} authIntent={authIntent} clearAuthIntent={() => setAuthIntent("normal")} />}{" "}
+        {page === "product" && active && catalogState === "ready" && <DiscoveryShelf title="You may also like" items={relatedProducts(active, products)} show={show} add={add} {...discovery} />}
+        {["shop", "product"].includes(page) && catalogState === "ready" && <DiscoveryShelf title="Recently viewed" items={recentProducts(recent, products, page === "product" ? active?.id : undefined)} show={show} add={add} {...discovery} />}
+        {page === "account" && <Account key={customerId ?? "signed-out"} user={user} setUser={setUser} note={note} add={add} wishlistView={<WishlistView favorites={favorites} catalogState={catalogState} show={show} add={add} favoriteSignIn={favoriteSignIn} goShop={() => go("shop")} />} reorder={reorder} goShop={() => go("shop")} authIntent={authIntent} clearAuthIntent={() => setAuthIntent("normal")} />}{" "}
         {page === "admin" && <AdminGuard user={user} go={go} note={note} />}{" "}
         {page === "checkout" && (
           <Checkout
@@ -558,7 +584,7 @@ function Header({ count, page, isAdmin, go, cart, menu, search }: any) {
     </header>
   );
 }
-function Home({ shop, story, show, category, add, note }: any) {
+function Home({ shop, story, show, category, add, note, favorites, favoriteSignIn }: any) {
   return (
     <>
       <section className="hero">
@@ -603,7 +629,7 @@ function Home({ shop, story, show, category, add, note }: any) {
         <Head eyebrow="THE EDIT" title="Made for main-character energy." action={shop} />
         <div className="product-grid">
           {products.slice(0, 4).map((p) => (
-            <Card key={p.id} p={p} show={show} add={add} note={note} />
+            <Card key={p.id} p={p} show={show} add={add} note={note} favorites={favorites} favoriteSignIn={favoriteSignIn} />
           ))}
         </div>
       </section>
@@ -644,21 +670,15 @@ function Head({ eyebrow, title, action }: any) {
     </div>
   );
 }
-function Card({ p, show, add, note }: any) {
-  const saveToWishlist = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { note?.("Sign in to save items to your wishlist."); return; }
-    try { await toggleWishlist(p.id, false); note?.(`${p.name} was saved to your wishlist.`); }
-    catch { note?.("We could not save this item right now."); }
-  };
+function Card({ p, show, add, favorites, favoriteSignIn }: any) {
   return (
     <article className="card">
-      <button className="wishlist-toggle" aria-label={`Save ${p.name} to wishlist`} onClick={() => void saveToWishlist()}><Heart size={18} /></button>
+      <FavoriteButton id={p.id} name={p.name} favorites={favorites} signIn={() => favoriteSignIn(p)} />
       <button className="product-img" onClick={() => show(p)}>
         <img src={p.image} alt={p.name} />
         {(p.badge || p.new) && <span className="badge">{p.badge || "New"}</span>}
         <span className="quick">
-          Quick add <Plus size={16} />
+          View product <Plus size={16} />
         </span>
       </button>
       <div className="product-info">
@@ -672,12 +692,25 @@ function Card({ p, show, add, note }: any) {
         <span className="rating">
           {p.reviews > 0 ? <><Star size={14} fill="currentColor" />{p.rating} <small>({p.reviews})</small></> : 'No reviews yet'}
         </span>
-        <button disabled={p.inventory <= 0} onClick={() => add(p)}>{p.inventory <= 0 ? "Out of stock" : "Add to bag"}</button>
+        <button disabled={p.inventory <= 0} onClick={() => p.options?.length ? show(p) : add(p)}>{p.inventory <= 0 ? "Out of stock" : p.options?.length ? "Choose options" : "Add to bag"}</button>
       </div>
     </article>
   );
 }
-function Shop({ items, category, setCategory, sort, setSort, query, setQuery, show, add, note }: any) {
+function DiscoveryShelf({ title, items, show, add, favorites, favoriteSignIn }: any) {
+  if (!items.length) return null;
+  return <section className="discovery-shelf" aria-label={title}><h2>{title}</h2><div className="product-grid">{items.map((p: Product) => <Card key={p.id} p={p} show={show} add={add} favorites={favorites} favoriteSignIn={favoriteSignIn} />)}</div></section>;
+}
+function WishlistView({ favorites, catalogState, show, add, favoriteSignIn, goShop }: { favorites: Favorites; catalogState: string; show: (p: Product) => void; add: (p: Product) => void; favoriteSignIn: (p: Product) => void; goShop: () => void }) {
+  if (favorites.loading || catalogState === "loading") return <p role="status">Loading your favorites…</p>;
+  if (favorites.error || catalogState === "error") return <div className="discovery-status" role="alert"><p>{favorites.error || "The collection could not be loaded."}</p><button className="btn" onClick={() => { if (favorites.error) favorites.retry(); if (catalogState === "error") window.dispatchEvent(new Event("blg:catalog-updated")); }}>Try again</button></div>;
+  if (!favorites.signedIn) return <p role="status">Sign in to see your favorites.</p>;
+  return <section className="account-favorites" aria-label="Wishlist"><h2>Your wishlist</h2><p>Keep your favorites close. Prices and availability reflect the current collection.</p>{favorites.ids.length ? <div className="product-grid">{favorites.ids.map(id => {
+    const p = products.find(product => product.id === id);
+    return p ? <Card key={id} p={p} show={show} add={add} favorites={favorites} favoriteSignIn={favoriteSignIn} /> : <article className="unavailable-favorite" key={id}><h3>Product no longer available</h3><p>This saved item is no longer in the collection.</p><FavoriteButton inline id={id} name="unavailable product" favorites={favorites} signIn={goShop} /></article>;
+  })}</div> : <div className="portal-empty"><h3>Your wishlist is waiting for you.</h3><p>Tap a heart in the collection to save something you love.</p><button className="btn dark" onClick={goShop}>Explore the shop</button></div>}</section>;
+}
+function Shop({ items, category, setCategory, sort, setSort, query, setQuery, show, add, note, favorites, favoriteSignIn }: any) {
   const cats = ["All", "Complexion", "Lips", "Eyes", "Cheeks", "Skincare"];
   return (
     <section className="shop">
@@ -724,7 +757,7 @@ function Shop({ items, category, setCategory, sort, setSort, query, setQuery, sh
       </div>
       <div className="product-grid">
         {items.map((p: Product) => (
-          <Card p={p} key={p.id} show={show} add={add} note={note} />
+          <Card p={p} key={p.id} show={show} add={add} note={note} favorites={favorites} favoriteSignIn={favoriteSignIn} />
         ))}
       </div>
       {!items.length && (
@@ -911,7 +944,7 @@ function BeautyGuide({ shopLips }: any) {
     </section>
   );
 }
-function Detail({ product, back, add, bag, signedIn, signIn }: any) {
+function Detail({ product, back, add, bag, signedIn, signIn, favorites, favoriteSignIn }: any) {
   const remaining = availableQuantity(product.id, product.inventory, bag);
   const [selected, setSelected] = useState<Record<string, string>>({}),
     [optionError, setOptionError] = useState(""),
@@ -938,6 +971,7 @@ function Detail({ product, back, add, bag, signedIn, signIn }: any) {
             {product.reviews > 0 ? <><Star size={16} fill="currentColor" /> {product.rating} <a href="#product-reviews" onClick={event => { event.preventDefault(); document.getElementById('product-reviews')?.scrollIntoView({ behavior: 'smooth' }); }}>{product.reviews} reviews</a></> : 'No reviews yet'}
           </div>
           <h3>{money(product.price)}</h3>
+          <FavoriteButton inline id={product.id} name={product.name} favorites={favorites} signIn={() => favoriteSignIn(product)} />
           <p className="desc">{product.description}</p>
           <ProductOptionSelectors groups={product.options ?? []} selected={selected} onChange={value => { const image = associatedImage(images, selected, value); if (image) setActiveImage(image); setSelected(value); setOptionError(""); }} />
           {optionError && <p role="alert">{optionError}</p>}
@@ -1461,7 +1495,7 @@ Thank you.`;
     </section>
   );
 }
-function Account({ user, setUser, note, add, reorder, goShop, authIntent, clearAuthIntent }: any) {
+function Account({ user, setUser, note, add, wishlistView, reorder, goShop, authIntent, clearAuthIntent }: any) {
   const [mode, setMode] = useState<"signin" | "signup" | "reset" | "confirm">("signin");
   const [email, setEmail] = useState(""), [password, setPassword] = useState(""), [confirmPassword, setConfirmPassword] = useState("");
   const [firstName, setFirstName] = useState(""), [lastName, setLastName] = useState(""), [busy, setBusy] = useState(false);
@@ -1521,7 +1555,7 @@ function Account({ user, setUser, note, add, reorder, goShop, authIntent, clearA
     finally { requestLock.current = false; setBusy(false); }
   };
   if (authIntent === "recovery") return <RecoveryPassword note={note} done={clearAuthIntent} />;
-  if (user) return <section className="account-page"><CustomerDashboard setUser={setUser} note={note} add={add} reorder={reorder} goShop={goShop} /></section>;
+  if (user) return <section className="account-page"><CustomerDashboard wishlistView={wishlistView} setUser={setUser} note={note} add={add} reorder={reorder} goShop={goShop} /></section>;
   return <section className="account-page"><div className="account-card">
     {mode === "confirm" ? <><p className="eyebrow">CHECK YOUR EMAIL</p><h1>Check your email.</h1><p>We’ve asked Supabase to send a confirmation link to <b>{email}</b>. Delivery can sometimes take a few minutes.</p>{existingUnconfirmed && <p className="auth-hint">An account with this email is waiting for confirmation. Check your inbox or request a new confirmation email when available.</p>}<div className="auth-delivery-help"><b>Didn’t receive it?</b><span>Check Spam or Junk, confirm the email address above is correct, and wait a few minutes before requesting another email.</span></div><button className="btn dark" disabled={busy || cooldownSeconds > 0} onClick={() => void resendConfirmation()}>{busy ? "Requesting…" : cooldownSeconds ? `Resend available in ${cooldownSeconds}s` : "Resend confirmation email"}</button><div className="account-switch"><button onClick={correctEmail}>Wrong email? Change email address</button><small>Changing this field does not update an existing account. Edit it, then explicitly create an account with the corrected address.</small><button onClick={() => changeMode("signin")}>Already confirmed your email? Sign in</button></div></> : <>
       <p className="eyebrow">{mode === "signup" ? "CREATE ACCOUNT" : mode === "reset" ? "RESET PASSWORD" : "WELCOME IN"}</p><h1>{mode === "signup" ? "Let’s make it official." : mode === "reset" ? "Reset your password." : "Welcome back."}</h1>
@@ -1544,7 +1578,7 @@ function RecoveryPassword({ note, done }: any) {
   };
   return <section className="account-page"><div className="account-card"><p className="eyebrow">CHOOSE A NEW PASSWORD</p><h1>Secure your account.</h1><form onSubmit={submit}><label>New password<input required minLength={6} type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label><label>Confirm new password<input required minLength={6} type="password" autoComplete="new-password" value={confirm} onChange={(event) => setConfirm(event.target.value)} /></label><button className="btn dark" disabled={busy}>{busy ? "Updating…" : "Update password"}</button></form></div></section>;
 }
-function CustomerDashboard({ setUser, note, add, reorder, goShop }: any) {
+function CustomerDashboard({ setUser, note, wishlistView, reorder, goShop }: any) {
   const [data, setData] = useState<any>(null);
   const [tab, setTab] = useState("Overview");
   const [busy, setBusy] = useState(false);
@@ -1565,7 +1599,6 @@ function CustomerDashboard({ setUser, note, add, reorder, goShop }: any) {
   const profile = data.profile ?? {};
   const orders = [...(data.orders ?? [])].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   const address = data.address ?? {};
-  const wish = data.wishlist ?? [];
   const updateProfile = (key: string, value: string) => setData((current: any) => ({ ...current, profile: { ...current.profile, [key]: value } }));
   const updateAddress = (key: string, value: string) => setData((current: any) => ({ ...current, address: { ...(current.address ?? {}), [key]: value } }));
   const save = async (fn: () => Promise<void>, message: string) => {
@@ -1580,7 +1613,7 @@ function CustomerDashboard({ setUser, note, add, reorder, goShop }: any) {
     if (addressIsCanada && !/^[ABCEGHJKLMNPRSTVXY]\d[A-Z]\d[A-Z]\d$/.test(postal)) { note("Enter a valid Canadian postal code."); return; }
     void save(() => saveCustomerAddress({ ...address, postal_code: addressIsCanada ? `${postal.slice(0, 3)} ${postal.slice(3)}` : (address.postal_code ?? "").trim() }, data.user.id), "Default delivery address saved.");
   };
-  return <section className="customer-account customer-portal"><header><p className="eyebrow">MY ACCOUNT</p><h1>{profile.first_name ? `Welcome back, ${profile.first_name}.` : "Welcome to your account."}</h1><p>{data.user.email}</p></header><nav aria-label="Account sections">{["Overview", "My Orders", "Addresses", "Profile", "Wishlist", "Security"].map((x) => <button className={tab === x ? "active" : ""} aria-current={tab === x ? "page" : undefined} onClick={() => { setTab(x); setSaveMessage(""); }} key={x}>{x === "My Orders" ? "Orders" : x === "Addresses" ? "Delivery Details" : x}</button>)}<button onClick={async () => { await supabase.auth.signOut(); setUser(null); }}>Sign out</button></nav><main>
+  return <section className="customer-account customer-portal"><header><p className="eyebrow">MY ACCOUNT</p><h1>{profile.first_name ? `Welcome back, ${profile.first_name}.` : "Welcome to your account."}</h1><p>{data.user.email}</p></header><nav aria-label="Account sections">{["Overview", "My Orders", "Wishlist", "Addresses", "Profile", "Security"].map((x) => <button className={tab === x ? "active" : ""} aria-current={tab === x ? "page" : undefined} onClick={() => { setTab(x); setSaveMessage(""); }} key={x}>{x === "My Orders" ? "Orders" : x === "Addresses" ? "Delivery Details" : x}</button>)}<button onClick={async () => { await supabase.auth.signOut(); setUser(null); }}>Sign out</button></nav><main>
     {saveMessage && <p className="account-feedback" role="status">{saveMessage}</p>}
     {tab === "Overview" && <div className="portal-overview">
       <section className="portal-card"><h2>Your orders</h2><p>{orders.length ? `${orders.length} ${orders.length === 1 ? "order" : "orders"} in your account` : "Your first order is waiting to happen."}</p><button className="text" onClick={() => setTab("My Orders")}>View orders</button></section>
@@ -1590,7 +1623,7 @@ function CustomerDashboard({ setUser, note, add, reorder, goShop }: any) {
     {tab === "My Orders" && <CustomerOrders orders={orders} refresh={load} reorder={reorder ? (id: string) => reorder(id, data.user.id) : undefined} goShop={goShop} />}
     {tab === "Profile" && <form className="account-form" onSubmit={(event) => { event.preventDefault(); void save(() => saveCustomerProfile(profile, data.user.id), "Profile saved."); }}><h2>Personal details</h2><p>Keep your name and contact number up to date.</p><label>First name<input autoComplete="given-name" value={profile.first_name ?? ""} onChange={(event) => updateProfile("first_name", event.target.value)} /></label><label>Last name<input autoComplete="family-name" value={profile.last_name ?? ""} onChange={(event) => updateProfile("last_name", event.target.value)} /></label><div className="profile-email"><span>Account email</span><p>{data.user.email}</p><small>Your sign-in email is read-only here.</small></div><label>Phone<input type="tel" autoComplete="tel" value={profile.phone ?? ""} onChange={(event) => updateProfile("phone", event.target.value)} /></label><button className="btn dark" disabled={busy}>Save changes</button></form>}
     {tab === "Addresses" && <form className="account-form" onSubmit={(event) => { event.preventDefault(); saveAddress(); }}><h2>Saved delivery details</h2><p>Your default address for future checkouts. Updating it does not change previous orders.</p>{["first_name", "last_name", "phone", "address", "unit", "country", "province", "city", "postal_code"].map((key) => <label key={key}>{key === "province" ? checkoutAddressRules(address.country).regionLabel : key === "postal_code" ? checkoutAddressRules(address.country).postalLabel : key === "unit" ? "Apartment / unit (optional)" : key.replace("_", " ")}<input required={key !== "unit" && (key !== "province" || checkoutAddressRules(address.country).regionRequired) && (key !== "postal_code" || checkoutAddressRules(address.country).postalRequired)} value={address[key] ?? (key === "country" ? "Canada" : "")} onChange={(event) => updateAddress(key, event.target.value)} /></label>)}<button className="btn dark" disabled={busy}>Save delivery details</button></form>}
-    {tab === "Wishlist" && <div className="wishlist-grid">{wish.length ? wish.map((row: any) => { const p = row.products; const available = p?.is_active && p?.inventory_quantity > 0; return p && <article key={p.id}><img src={p.image_url} alt={p.name} /><b>{p.name}</b><span>{money(p.price_cents / 100)}</span><small>{available ? "Available" : "Currently unavailable"}</small>{available && <button className="btn dark" onClick={() => add({ id: p.id, name: p.name, category: "Saved item", price: p.price_cents / 100, rating: 0, reviews: 0, image: p.image_url, description: "", shades: ["Universal"], inventory: p.inventory_quantity })}>Add to bag</button>}<button onClick={() => void save(() => toggleWishlist(p.id, true), "Removed from wishlist.")}>Remove</button></article>; }) : <p>Your wishlist is waiting for something beautiful. <button className="text" onClick={goShop}>Explore products</button></p>}</div>}
+    {tab === "Wishlist" && wishlistView}
     {tab === "Security" && <div className="account-form"><p>Use a secure password to protect your account.</p><form onSubmit={(event) => { event.preventDefault(); if (newPassword.length < 6) { note("Use a password with at least 6 characters."); return; } if (newPassword !== confirmNewPassword) { note("Passwords do not match."); return; } void save(async () => { const { error } = await supabase.auth.updateUser({ password: newPassword }); if (error) throw error; setNewPassword(""); setConfirmNewPassword(""); }, "Your password has been updated."); }}><label>New password<input required minLength={6} type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></label><label>Confirm new password<input required minLength={6} type="password" value={confirmNewPassword} onChange={(event) => setConfirmNewPassword(event.target.value)} /></label><button className="btn dark" disabled={busy}>Update password</button></form><button className="text" onClick={async () => { const { error } = await supabase.auth.resetPasswordForEmail(profile.email, { redirectTo: getAuthRedirectUrl() }); note(error ? "We could not send your password-reset link." : "Check your email for a password-reset link."); }}>Send a password-reset link instead</button></div>}
   </main></section>;
 }

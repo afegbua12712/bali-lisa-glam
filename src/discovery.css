@@ -1,0 +1,40 @@
+.favorite-control { position: absolute; z-index: 3; right: 12px; top: 12px; width: calc(100% - 24px); pointer-events: none; }
+.favorite-control > * { pointer-events: auto; }
+.favorite-control .wishlist-toggle { position: static; width: 44px; height: 44px; margin-left: auto; color: var(--ink); background: var(--cream); border: 1px solid var(--line); }
+.favorite-control .wishlist-toggle[aria-pressed="true"] { color: var(--clay); }
+.favorite-control button:focus-visible, .discovery-shelf button:focus-visible, .account-favorites button:focus-visible, .discovery-status button:focus-visible { outline: 2px solid var(--ink); outline-offset: 4px; }
+.favorite-control button:disabled { opacity: .55; cursor: wait; }
+.favorite-inline { position: relative; top: auto; right: auto; width: auto; margin-block: 12px; }
+.favorite-inline .wishlist-toggle { display: flex; gap: 10px; width: auto; height: auto; min-height: 44px; margin-left: 0; padding: 10px 14px; border-radius: 0; box-shadow: none; text-align: left; }
+.favorite-inline svg { flex-shrink: 0; }
+.favorite-message { position: absolute; right: 0; top: 50px; width: min(230px, 100%); padding: 14px; background: var(--cream); color: var(--ink); border: 1px solid var(--line); box-shadow: 0 4px 16px #0002; font-size: 14px; line-height: 1.5; }
+.favorite-message p { margin: 0 0 8px; }
+.favorite-message button { min-height: 44px; margin-right: 14px; text-decoration: underline; }
+.favorite-inline .favorite-message { position: static; width: auto; margin-top: 10px; }
+.discovery-shelf { padding: 32px max(24px, calc((100vw - 1280px) / 2)) 56px; }
+.discovery-shelf h2, .account-favorites h2 { margin: 0 0 24px; font-size: clamp(26px, 3vw, 36px); }
+.discovery-shelf .product-grid, .account-favorites .product-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px 20px; }
+.discovery-shelf .card, .account-favorites .card { min-width: 0; }
+.discovery-shelf .product-info, .account-favorites .product-info { flex-wrap: wrap; gap: 8px; }
+.discovery-shelf .product-info button, .account-favorites .product-info button { overflow-wrap: anywhere; }
+.discovery-shelf .card-bottom, .account-favorites .card-bottom { flex-wrap: wrap; gap: 8px; }
+.discovery-shelf .card-bottom button, .account-favorites .card-bottom button { min-height: 44px; white-space: normal; }
+.account-favorites > p { line-height: 1.7; color: var(--muted); margin-bottom: 24px; }
+.unavailable-favorite { padding: 20px; border: 1px solid var(--line); min-width: 0; overflow-wrap: anywhere; }
+.unavailable-favorite h3 { font-size: 22px; }
+.unavailable-favorite p { line-height: 1.6; }
+.discovery-status { padding: 24px; line-height: 1.6; }
+.discovery-status button { min-height: 44px; text-decoration: underline; }
+@media (max-width: 1100px) {
+  .account-favorites .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 800px) {
+  .discovery-shelf .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .discovery-shelf { padding: 24px 20px 40px; }
+}
+@media (max-width: 600px) {
+  .account-favorites .product-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 400px) {
+  .discovery-shelf .product-grid { grid-template-columns: minmax(0, 1fr); }
+}
