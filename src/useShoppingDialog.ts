@@ -1,6 +1,6 @@
 import { useEffect, useRef, type RefObject } from 'react'
 
-// Shared only by the existing mobile menu and bag; navigation stays state-based.
+// Shared by the menu, bag and Studio editor; navigation stays state-based.
 export function useShoppingDialog(open: boolean, panel: RefObject<HTMLElement | null>, close: () => void) {
   const onClose = useRef(close)
   useEffect(() => { onClose.current = close }, [close])
@@ -9,11 +9,18 @@ export function useShoppingDialog(open: boolean, panel: RefObject<HTMLElement | 
     const element = panel.current
     const previous = document.activeElement as HTMLElement | null
     const overflow = document.body.style.overflow
-    const background = [...document.querySelectorAll<HTMLElement>('.app > header, .app > main, .app > footer, .app > .search-bar')]
+    // Inert siblings along the ancestor chain, never a parent of the dialog.
+    // Studio's editor is nested inside main, unlike the menu and bag.
+    const background: HTMLElement[] = []
+    for (let node: HTMLElement | null = element; node && node !== document.body; node = node.parentElement) {
+      for (const sibling of node.parentElement?.children ?? []) {
+        if (sibling !== node && sibling instanceof HTMLElement) background.push(sibling)
+      }
+    }
     const inert = background.map(node => node.inert)
     background.forEach(node => { node.inert = true })
     document.body.style.overflow = 'hidden'
-    const controls = () => [...element.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), [tabindex="0"]')].filter(node => node.getClientRects().length)
+    const controls = () => [...element.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]')].filter(node => node.getClientRects().length && !node.matches(':disabled'))
     const timer = setTimeout(() => controls()[0]?.focus(), 0)
     const keydown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') { event.preventDefault(); onClose.current(); return }

@@ -12,6 +12,9 @@
 .admin :is(button,input,select):focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 .admin button { min-height: 44px; }
 .admin button:disabled { opacity: .55; cursor: not-allowed; }
+/* The navigation surface stays dark in every appearance mode. */
+.admin .admin-nav > button:not(.wordmark) { color: #eee6e0; }
+.admin .admin-nav button:focus-visible { outline-color: #f0bba7; }
 @media (min-width: 961px) and (max-width: 1500px) {
   .admin .product-table-head { display: none; }
   .admin .product-table-row { display: block; padding: 20px; }

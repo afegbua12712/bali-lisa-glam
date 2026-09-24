@@ -10,6 +10,7 @@ export type AdminProductInput = {
   category_id: number | null; image_url: string; shades: string[]; is_active: boolean
   options: OptionGroup[]
   images: ProductImage[]
+  expected_inventory_quantity?: number
 }
 
 // Load complete operational lists rather than silently stopping at the API row cap.
@@ -45,6 +46,7 @@ export async function saveAdminProduct(input: AdminProductInput, id?: number) {
     description: input.description.trim(),
     price_cents: Number(input.price_cents),
     inventory_quantity: Number(input.inventory_quantity),
+    expected_inventory_quantity: input.expected_inventory_quantity,
     category_id: input.category_id ?? null,
     image_url: input.image_url.trim(),
     shades: Array.isArray(input.shades) && input.shades.length ? input.shades : ['Universal'],

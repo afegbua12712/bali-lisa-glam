@@ -1,4 +1,5 @@
 import { studioMetrics, filterStudioProducts, customerActivity } from "./lib/studio-operations";
+import { sessionStorageSafe as sessionStorage } from "./lib/session-storage";
 import "./studio-operations.css";
 import { ShipmentDetails } from "./ShipmentDetails";
 import { ShipmentEmailAction } from "./ShipmentEmailAction";
@@ -470,8 +471,9 @@ export default function App() {
         {page === "product" && catalogState === "ready" && !activeProduct && <section className="storefront-empty"><h1>Product unavailable</h1><p>This product is no longer in the current collection.</p><button className="btn dark" onClick={() => go("shop")}>Explore the collection</button></section>}
         {page === "product" && activeProduct && catalogState === "ready" && <DiscoveryShelf title="You may also like" items={relatedProducts(activeProduct, products)} show={show} add={add} {...discovery} />}
         {["shop", "product"].includes(page) && catalogState === "ready" && <DiscoveryShelf title="Recently viewed" items={recentProducts(recent, products, page === "product" ? active?.id : undefined)} show={show} add={add} {...discovery} />}
-        {page === "account" && <Account key={customerId ?? "signed-out"} user={user} setUser={setUser} note={note} add={add} wishlistView={<WishlistView favorites={favorites} catalogState={catalogState} show={show} add={add} favoriteSignIn={favoriteSignIn} goShop={() => go("shop")} />} reorder={reorder} goShop={() => go("shop")} authIntent={authIntent} clearAuthIntent={() => setAuthIntent("normal")} />}{" "}
-        {page === "admin" && <AdminGuard user={user} go={go} note={note} />}{" "}
+        {page === "account" && !authReady && <section className="account-page"><p role="status">Verifying your session...</p></section>}
+        {page === "account" && authReady && <Account key={customerId ?? "signed-out"} user={user} setUser={setUser} note={note} add={add} wishlistView={<WishlistView favorites={favorites} catalogState={catalogState} show={show} add={add} favoriteSignIn={favoriteSignIn} goShop={() => go("shop")} />} reorder={reorder} goShop={() => go("shop")} authIntent={authIntent} clearAuthIntent={() => setAuthIntent("normal")} />}{" "}
+        {page === "admin" && <AdminGuard user={user} isAdmin={authReady && isAdmin} go={go} note={note} />}{" "}
         {page === "checkout" && (
           <Checkout
             key={customerId ?? "signed-out"}
@@ -1618,13 +1620,7 @@ function CustomerOrders({ orders, refresh, reorder, goShop }: any) {
     }) : <div className="portal-empty"><h3>{orders.length ? "No orders match this filter." : "Your order history starts here."}</h3><p>{orders.length ? "Choose another status to see your orders." : "You have not placed any orders yet. Explore the shop and find something you love."}</p>{goShop && <button className="btn dark" onClick={goShop}>Explore the shop</button>}</div>}
   </section>;
 }
-function AdminGuard({ user, go, note }: any) {
-  const [isAdmin, setIsAdmin] = useState(false);
-  useEffect(() => {
-    void getProfile()
-      .then(({ profile }) => setIsAdmin(profile?.role === "admin"))
-      .catch(() => setIsAdmin(false));
-  }, [user]);
+function AdminGuard({ user, isAdmin, go, note }: any) {
   if (isAdmin) return <Admin note={note} />;
   return (
     <section className="admin-gate">
@@ -1689,18 +1685,10 @@ function Admin({ note }: any) {
     void load();
     return () => { loadGeneration.current++; };
   }, []);
-  useEffect(() => {
-    if (!editing) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !uploadingImage) {
-        setEditing(null);
-
-        setEditorError("");
-      }
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [editing, uploadingImage]);
+  const editorPanel = useRef<HTMLFormElement>(null);
+  useShoppingDialog(Boolean(editing), editorPanel, () => {
+    if (!uploadingImage) { setEditing(null); setEditorError(""); }
+  });
   const saveLock = useRef(false);
   const saveProduct = async (e: FormEvent) => {
     e.preventDefault();
@@ -1728,6 +1716,8 @@ function Admin({ note }: any) {
       logOperationFailure("Studio product save failed:", saveError);
       const message = saveError?.code === "23505"
         ? "A product with this slug already exists. Choose a unique slug."
+        : saveError?.message === "Product stock changed; refresh before saving"
+          ? "Stock changed while this editor was open. Close the editor, refresh Studio, and review the current stock before saving."
         : "We couldn't save this product. Please review the details and try again.";
       setEditorError(message);
       note(message);
@@ -1868,11 +1858,11 @@ function Admin({ note }: any) {
               if (event.target === event.currentTarget) closeEditor();
             }}
           >
-            <form className="product-editor" onSubmit={saveProduct}>
+            <form ref={editorPanel} className="product-editor" role="dialog" aria-modal="true" aria-labelledby="product-editor-title" onSubmit={saveProduct}>
               <header className="product-editor-header">
                 <div>
                   <p className="eyebrow">PRODUCT CATALOG</p>
-                  <h2>{editing.id ? "Edit product" : "Add product"}</h2>
+                  <h2 id="product-editor-title">{editing.id ? "Edit product" : "Add product"}</h2>
                 </div>
                 <button
                   type="button"
@@ -2059,7 +2049,7 @@ function AdminProducts({ products, query, setQuery, edit, archive, restore, remo
             <button
               className="product-table-action" disabled={busy}
               onClick={() =>
-                edit({ ...p, category_id: p.categories?.id, shades: p.shades ?? ["Universal"] })
+                edit({ ...p, expected_inventory_quantity: p.inventory_quantity, category_id: p.categories?.id, shades: p.shades ?? ["Universal"] })
               }
             >
               Edit

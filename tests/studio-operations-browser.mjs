@@ -6,6 +6,7 @@ import {createServer} from 'node:http'
 import {spawn} from 'node:child_process'
 import {mkdir,readFile,writeFile} from 'node:fs/promises'
 import {resolve,extname,sep} from 'node:path'
+import {launchAccountChecks} from './launch-browser-checks.mjs'
 const output=resolve('node_modules/.tmp/studio-operations-browser'),dist=resolve('dist')
 await mkdir(output,{recursive:true})
 const svg='<svg xmlns="http://www.w3.org/2000/svg" width="400" height="500"><rect width="400" height="500" fill="#e5d4ce"/><rect x="155" y="150" width="90" height="200" rx="12" fill="#b07468"/></svg>'
@@ -51,9 +52,10 @@ try {
       let body='[]',status=200,type='application/json'
       if(path==='/auth/v1/user')body=JSON.stringify(user)
       else if(path==='/rest/v1/profiles')body=JSON.stringify(new URL(request.url).searchParams.has('id')?customers[0]:customers)
-      else if(path==='/rest/v1/orders')body=JSON.stringify(orders)
+      else if(path==='/rest/v1/orders')body=JSON.stringify(new URL(request.url).searchParams.has('customer_id')?[]:orders)
+      else if(path==='/rest/v1/customer_addresses')body='null'
       else if(path==='/rest/v1/categories')body=JSON.stringify([{id:1,name:'Lips',slug:'lips'}])
-      else if(path==='/rest/v1/website_settings') {if(request.method==='POST'){settingsWrites++;status=failSettings?503:200;body='{}'}else{status=failLoad?503:200;body=JSON.stringify({id:true,business_name:'Fixture',standard_shipping_cents:800,free_shipping_threshold_cents:7500,international_standard_shipping_cents:2500,international_free_shipping_threshold_cents:null})}}
+      else if(path==='/rest/v1/website_settings') {if(request.method==='POST'){settingsWrites++;status=failSettings?503:200;body='{}'}else{status=failLoad?503:200;body=JSON.stringify({id:true,business_name:'Fixture',business_email:'support@example.test',whatsapp_number:'+14165550100',standard_shipping_cents:800,free_shipping_threshold_cents:7500,international_standard_shipping_cents:2500,international_free_shipping_threshold_cents:null})}}
       else if(path==='/rest/v1/products'){await new Promise(r=>setTimeout(r,250));body=JSON.stringify(failCatalog?{message:'Fixture failure'}:rows);status=failCatalog?503:200}
       else if(resourceType==='Image'){body=svg;type='image/svg+xml'}
       else if(!path.startsWith('/rest/v1/')&&request.method!=='OPTIONS'){await call('Fetch.failRequest',{requestId,errorReason:'BlockedByClient'});return}
@@ -79,8 +81,25 @@ try {
       await click(view);await new Promise(r=>setTimeout(r,100))
       const measured=await evaluate(`(()=>{const root=document.querySelector('.admin');return{width:innerWidth,scroll:document.documentElement.scrollWidth,theme:document.documentElement.dataset.theme,nav:[...root.querySelectorAll('.admin-nav>button:not(.wordmark)')].every(e=>e.getClientRects().length&&e.getBoundingClientRect().height>=44),overflow:[...root.querySelectorAll('.stat,.studio-customers article,input,select,.product-table-row,.order-card,.account-card')].filter(e=>e.getClientRects().length).filter(e=>{const r=e.getBoundingClientRect();return r.left< -1||r.right>innerWidth+1||e.scrollWidth>e.clientWidth+2}).map(e=>e.className||e.tagName)}})()`)
       assert.ok(measured.scroll<=width+1,view);assert.deepEqual(measured.overflow,[],width+' '+theme+' '+view);assert.equal(measured.nav,true);assert.equal(measured.theme,theme==='default'?'dark':theme);results.push({view,...measured})
+      const navContrast=await evaluate(`(()=>{const lum=color=>{const c=color.match(/[\\d.]+/g).slice(0,3).map(Number).map(v=>{v/=255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4});return c[0]*.2126+c[1]*.7152+c[2]*.0722};return [...document.querySelectorAll('.admin-nav>button:not(.wordmark)')].every(e=>{const s=getComputedStyle(e),bg=s.backgroundColor==='rgba(0, 0, 0, 0)'?getComputedStyle(e.parentElement).backgroundColor:s.backgroundColor;const a=lum(s.color),b=lum(bg);return (Math.max(a,b)+.05)/(Math.min(a,b)+.05)>=4.5})})()`)
+      assert.equal(navContrast,true,'Studio navigation contrast '+theme)
       if(view==='Overview')assert.ok(await evaluate('document.querySelector(".stats").textContent.includes("30.00")'))
       if(view==='Products') {await value('.product-search',' product 1 ');await until('document.querySelectorAll(".product-table-row").length===1');await value('[aria-label="Inventory visibility"]','out');await until('document.querySelectorAll(".product-table-row").length===0');await value('.product-search','');await until('document.querySelectorAll(".product-table-row").length===1')}
+      if(view==='Products') {
+        await evaluate('document.querySelector(".product-table-action").focus(); document.querySelector(".product-table-action").click()')
+        await until('!!document.querySelector(".product-editor") && document.querySelector(".product-editor").contains(document.activeElement)')
+        assert.equal(await evaluate('document.querySelector(".product-editor").closest("[inert]")'),null)
+        assert.equal(await evaluate('document.querySelector(".product-editor").getAttribute("role")'),'dialog')
+        assert.ok(await evaluate('document.querySelector(".product-editor").getBoundingClientRect().right <= innerWidth + 1'))
+        await evaluate('document.querySelector(".product-editor-close").focus()')
+        await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9,modifiers:8})
+        assert.equal(await evaluate('document.activeElement.textContent'),'Save product')
+        await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9})
+        assert.equal(await evaluate('document.activeElement.getAttribute("aria-label")'),'Close product editor')
+        await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27})
+        await until('!document.querySelector(".product-editor")')
+        assert.equal(await evaluate('document.activeElement.textContent'),'Edit')
+      }
       if(view==='Customers') {await value('.studio-customers input','customer@');await until('document.querySelectorAll(".studio-customers article").length===1');assert.ok(await evaluate('document.querySelector(".studio-customers").textContent.includes("30.00")'))}
       if(width===320&&theme==='dark')await writeFile(output+'/'+view+'.png',Buffer.from((await call('Page.captureScreenshot',{format:'png',captureBeyondViewport:true})).data,'base64'))
     }
@@ -96,8 +115,16 @@ try {
   await evaluate('document.querySelector(".account-card").requestSubmit()');await until('!!document.querySelector(".account-card [role=alert]")');assert.equal(settingsWrites,1);assert.equal(await evaluate('document.querySelector(".account-card button").disabled'),false)
   failLoad=true;await evaluate('[...document.querySelectorAll(".admin-main header button")].find(e=>e.textContent==="Refresh Studio").click()');await until('document.querySelector(".admin-main .empty")?.textContent.includes("could not be loaded")')
   failLoad=false;await evaluate('document.querySelector(".admin-main .empty button").click()');await until('!!document.querySelector(".account-card")')
+  if(process.argv.includes('--launch')) {
+    await launchAccountChecks({call,evaluate,until})
+    await evaluate('[...document.querySelectorAll(".header nav button")].find(e=>e.textContent==="Studio").click()')
+    await until('!!document.querySelector(".admin")')
+  }
+  await evaluate('localStorage.removeItem("sb-zoaymppxmnilfyzfytcj-auth-token"); const c=new BroadcastChannel("sb-zoaymppxmnilfyzfytcj-auth-token"); c.postMessage({event:"SIGNED_OUT",session:null}); setTimeout(()=>c.close(),100)')
+  await until('!document.querySelector(".admin") && !!document.querySelector(".admin-gate")')
+  if(process.argv.includes('--launch'))await launchAccountChecks({call,evaluate,until,signedOut:true})
   assert.deepEqual(errors,[])
-  assert.ok(requests.every(r=>['GET','OPTIONS'].includes(r.method)||(r.method==='POST'&&['/rest/v1/rpc/product_review_stats','/rest/v1/rpc/admin_product_reviews','/rest/v1/website_settings'].includes(r.path))))
-  await writeFile(output+'/results.json',JSON.stringify({results,requests},null,2));console.log(results.length+' actual-App Studio responsive scenarios passed; search, stock filtering, customer spend, settings failure and refresh retry passed. All external requests intercepted.')
+  assert.ok(requests.every(r=>['GET','OPTIONS'].includes(r.method)||(r.method==='POST'&&['/rest/v1/rpc/product_review_stats','/rest/v1/rpc/my_product_review','/rest/v1/rpc/admin_product_reviews','/rest/v1/website_settings'].includes(r.path))),JSON.stringify(requests.filter(r=>!['GET','OPTIONS'].includes(r.method))))
+  await writeFile(output+'/results.json',JSON.stringify({results,requests},null,2));console.log(results.length+' actual-App Studio responsive scenarios and 15 editor keyboard scenarios passed; search, stock filtering, customer spend, settings failure, refresh retry and logout isolation passed. All external requests intercepted.')
   await call('Browser.close')
 }finally{socket?.close();chrome.kill();server.close()}
