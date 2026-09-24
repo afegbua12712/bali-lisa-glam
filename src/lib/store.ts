@@ -7,6 +7,10 @@ export type StoreProduct = {
   id: number
   name: string
   category: string
+  categoryActive?: boolean
+  categoryOrder?: number
+  categoryImage?: string
+  createdAt?: string
   price: number
   rating: number
   reviews: number
@@ -23,17 +27,20 @@ export type StoreProduct = {
 type ProductRow = {
   id: number; name: string; price_cents: number; rating: number; review_count: number; image_url: string
   description: string; shades: string[]; badge: string | null; is_new: boolean; inventory_quantity: number
-  categories: { name: string } | null
+  created_at: string
+  categories: { name: string; is_active: boolean; sort_order: number; image_url: string | null } | null
   product_option_groups: Parameters<typeof normalizeOptions>[0]
   product_images: ProductImage[]
 }
 
 export async function fetchProducts(): Promise<StoreProduct[]> {
-  const { data, error } = await supabase.from('products').select('id,name,price_cents,image_url,description,shades,badge,is_new,inventory_quantity,categories(name),product_images(id,url,alt_text,display_order,option_value_id),product_option_groups(id,name,display_order,required,product_option_values(id,label,display_order,active,color))').eq('is_active', true).order('created_at', { ascending: false })
+  const { data, error } = await supabase.from('products').select('id,name,price_cents,image_url,description,shades,badge,is_new,inventory_quantity,created_at,categories(name,is_active,sort_order,image_url),product_images(id,url,alt_text,display_order,option_value_id),product_option_groups(id,name,display_order,required,product_option_values(id,label,display_order,active,color))').eq('is_active', true).order('created_at', { ascending: false })
   if (error) throw error
   const stats = await fetchReviewStats()
   return (data as unknown as ProductRow[]).map(product => ({
-    id: product.id, name: product.name, category: product.categories?.name ?? 'Beauty', price: product.price_cents / 100,
+    id: product.id, name: product.name, category: product.categories?.is_active === false ? '' : product.categories?.name ?? '', price: product.price_cents / 100,
+    categoryActive: Boolean(product.categories && product.categories.is_active !== false), categoryOrder: product.categories?.sort_order,
+    categoryImage: product.categories?.image_url ?? undefined, createdAt: product.created_at,
     rating: stats.find(row => row.product_id === product.id)?.average_rating ?? 0,
     reviews: stats.find(row => row.product_id === product.id)?.review_count ?? 0,
     image: productImages(product.product_images, product.image_url)[0]?.url ?? '',

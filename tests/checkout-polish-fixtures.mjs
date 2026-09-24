@@ -29,7 +29,7 @@ const source = `import {useState,useEffect,useRef} from 'react';
   ${constants}
   export ${viewSource('Checkout')}
   export ${viewSource('Header')}
-  export function Mobile({isAdmin}) { const menu=true,page='home',setMenu=()=>{},go=()=>{},setCategory=()=>{};return <>${'{'}${mobile}${'}'}</> }
+  export function Mobile({isAdmin}) { const menu=true,menuPanel=null,shopCategories=[],resetShop=()=>{},category='All',page='home',setMenu=()=>{},go=()=>{},setCategory=()=>{};return <>${'{'}${mobile}${'}'}</> }
 `
 export function views(step = 1, country = 'Canada', savedDelivery = false) {
   let index=0

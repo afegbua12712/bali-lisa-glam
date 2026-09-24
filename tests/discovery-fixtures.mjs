@@ -13,8 +13,9 @@ export const {FavoriteButton} = compile(read('src/FavoriteButton.tsx'))
 const images = compile(read('src/lib/product-images.ts'))
 const options = compile(read('src/lib/product-options.ts'))
 const journey = compile(read('src/lib/checkout-journey.ts'),{'./product-options':options,'./support-pages':compile(read('src/lib/support-pages.ts'))})
-const detailDependencies = {...images,...options,...journey,...compile(read('src/ProductGallery.tsx')),...compile(read('src/ProductOptionSelectors.tsx')),ProductReviews:()=>null}
-export const components = compile(`import {FavoriteButton,products,money,Star,Plus} from 'fixture';
+const storefront = compile(read('src/lib/storefront.ts'),{'./product-options':options})
+const detailDependencies = {...storefront,...images,...options,...journey,...compile(read('src/ProductGallery.tsx')),...compile(read('src/ProductOptionSelectors.tsx')),ProductReviews:()=>null}
+export const components = compile(`import {FavoriteButton,products,money,Star,Plus,inStock} from 'fixture';
   import {useState,useEffect} from 'react';
   import {availableQuantity,productImages,associatedImage,ProductGallery,ProductOptionSelectors,ProductReviews,selectProductOptions,optionSummary,ArrowLeft,Minus,Package} from 'fixture';
   export ${viewSource('Card')}

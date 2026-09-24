@@ -64,6 +64,9 @@ import { FavoriteButton } from "./FavoriteButton";
 import { useFavorites, type Favorites } from "./useFavorites";
 import { readRecent, rememberProduct, recentProducts, relatedProducts, RECENT_KEY } from "./lib/discovery";
 import "./discovery.css";
+import "./storefront.css";
+import { browseProducts, storefrontCategories, priceRangeError, inStock, bagItemIssue, refreshBagPrices } from "./lib/storefront";
+import { useShoppingDialog } from "./useShoppingDialog";
 import { planReorder } from "./lib/reorder";
 import { clearAuthCallbackUrl, friendlyAuthError, getAuthRedirectUrl, isAuthRateLimited } from "./lib/auth";
 import { sendOrderEmail } from "./lib/order-email";
@@ -86,6 +89,10 @@ type Product = {
   id: number;
   name: string;
   category: string;
+  categoryActive?: boolean;
+  categoryOrder?: number;
+  categoryImage?: string;
+  createdAt?: string;
   price: number;
   rating: number;
   reviews: number;
@@ -98,26 +105,8 @@ type Product = {
   badge?: string;
   new?: boolean;
 };
-type CartLine = Product & { quantity: number; shade: string; selected_options?: OptionSelection[] };
+type CartLine = Product & { previousPrice?: number; quantity: number; shade: string; selected_options?: OptionSelection[] };
 const products: Product[] = [];
-const categories = [
-  [
-    "Complexion",
-    "https://images.unsplash.com/photo-1512496015851-a90fb38ba796?auto=format&fit=crop&w=700&q=80",
-  ],
-  [
-    "Lips",
-    "https://images.unsplash.com/photo-1586495777744-4413f21062fa?auto=format&fit=crop&w=700&q=80",
-  ],
-  [
-    "Eyes",
-    "https://images.unsplash.com/photo-1487412912498-0447578fcca8?auto=format&fit=crop&w=700&q=80",
-  ],
-  [
-    "Skincare",
-    "https://images.unsplash.com/photo-1611930022073-b7a4ba5fcccd?auto=format&fit=crop&w=700&q=80",
-  ],
-];
 const money = (n: number) => `$${n.toFixed(2)}`;
 const orderMoney = (cents: number, currency = "CAD") =>
   new Intl.NumberFormat("en-CA", { style: "currency", currency, currencyDisplay: "code" }).format(cents / 100);
@@ -150,6 +139,11 @@ export default function App() {
       readSavedCart({ getItem: key => sessionStorage.getItem(key) }),
     ),
     [catalogVersion, setCatalogVersion] = useState(0);
+  const [minPrice, setMinPrice] = useState("");
+  const [maxPrice, setMaxPrice] = useState("");
+  const [availability, setAvailability] = useState("all");
+  const menuPanel = useRef<HTMLDivElement>(null);
+  useShoppingDialog(menu, menuPanel, () => setMenu(false));
   const [authReady, setAuthReady] = useState(false);
   const favorites = useFavorites(customerId, authReady);
   const [recent, setRecent] = useState(() => readRecent({ getItem: key => localStorage.getItem(key) }));
@@ -174,6 +168,7 @@ export default function App() {
     }
     setPage(p);
     setMenu(false);
+    setSearch(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
   useEffect(() => {
@@ -198,7 +193,8 @@ export default function App() {
     setTimeout(() => setToast(""), 2500);
   };
   const add = (input: Product, shade?: string, selected_options?: OptionSelection[], quantity = 1) => {
-    const p = products.find(item => item.id === input.id) ?? input;
+    const p = products.find(item => item.id === input.id);
+    if (!p || !inStock(p.inventory) || catalogState !== "ready") { note("This product is currently unavailable. Please refresh the collection."); return; }
     if (p.options?.length && selected_options === undefined) {
       setActive(p);
       go("product");
@@ -261,33 +257,29 @@ export default function App() {
   const subtotal = cart.reduce((s, x) => s + x.price * x.quantity, 0);
   const items = useMemo(() => {
     void catalogVersion;
-    return products
-      .filter(
-        (p) =>
-          (category === "All" || p.category === category) &&
-          p.name.toLowerCase().includes(query.toLowerCase()),
-      )
-      .sort((a, b) =>
-        sort === "Price: low to high"
-          ? a.price - b.price
-          : sort === "Price: high to low"
-            ? b.price - a.price
-            : sort === "Top rated"
-              ? b.rating - a.rating
-              : 0,
-      );
-  }, [category, query, sort, catalogVersion]);
+    return browseProducts(products, { query, category, sort, minPrice, maxPrice, availability });
+  }, [query, category, sort, minPrice, maxPrice, availability, catalogVersion]);
+  const shopCategories = useMemo(() => { void catalogVersion; return storefrontCategories(products); }, [catalogVersion]);
+  const resetFilters = () => { setCategory("All"); setMinPrice(""); setMaxPrice(""); setAvailability("all"); };
+  const resetShop = () => { resetFilters(); setQuery(""); setSort("Featured"); };
+  const browseCategory = (value: string) => { resetShop(); setCategory(value); go("shop"); };
+  const activeProduct = active ? products.find(p => p.id === active.id) : undefined;
+  const bagIssue = catalogState === "ready" ? cart.map(line => bagItemIssue(line, products, cart)).find(Boolean) ?? "" : "Wait for the collection to load before checking out.";
+  useEffect(() => {
+    if (catalogState === "ready") setCart(current => refreshBagPrices(current, products));
+  }, [catalogVersion, catalogState]);
   useEffect(() => {
     let alive = true;
-    const refreshCatalog = () => { setCatalogState("loading"); void fetchProducts()
+    let catalogRequest = 0;
+    const refreshCatalog = () => { const request = ++catalogRequest; setCatalogState("loading"); void fetchProducts()
       .then((data) => {
-        if (alive) {
+        if (alive && request === catalogRequest) {
           products.splice(0, products.length, ...data);
           setCatalogVersion((v) => v + 1);
           setCatalogState("ready");
         }
       })
-      .catch(() => { if (alive) setCatalogState("error"); }); };
+      .catch(() => { if (alive && request === catalogRequest) setCatalogState("error"); }); };
     refreshCatalog();
     window.addEventListener("blg:catalog-updated", refreshCatalog);
     return () => {
@@ -303,14 +295,6 @@ export default function App() {
     window.addEventListener("blg:checkout-complete", clearCart);
     return () => window.removeEventListener("blg:checkout-complete", clearCart);
   }, []);
-  useEffect(() => {
-    if (!menu) return;
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setMenu(false); };
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    window.addEventListener("keydown", closeOnEscape);
-    return () => { document.body.style.overflow = previousOverflow; window.removeEventListener("keydown", closeOnEscape); };
-  }, [menu]);
   useEffect(() => {
     let alive = true;
     let generation = 0;
@@ -374,24 +358,24 @@ export default function App() {
         page={page}
         isAdmin={isAdmin}
         go={go}
-        cart={() => setCartOpen(true)}
+        cart={() => { setMenu(false); setCartOpen(true); }}
         menu={() => setMenu(!menu)}
         search={() => setSearch(!search)}
       />
       {menu && (
         <>
         <button className="mobile-menu-scrim" aria-label="Close navigation menu" onClick={() => setMenu(false)} />
-        <div className="mobile-menu" role="dialog" aria-modal="true" aria-label="Mobile navigation">
+        <div ref={menuPanel} className="mobile-menu" role="dialog" aria-modal="true" aria-label="Mobile navigation">
           <div className="mobile-menu-head"><span>BALI & LISA <i>GLAM</i></span><button type="button" aria-label="Close navigation menu" onClick={() => setMenu(false)}><X size={21} /></button></div>
           <AppearanceControl />
-          {["Shop all", "Complexion", "Lips", "Eyes", "Skincare", "Our story", "Beauty guide", "Account", ...(isAdmin ? ["Studio"] : [])].map((x) => (
+          {["Shop all", ...shopCategories.map(c => c.name), "Our story", "Beauty guide", "Account", ...(isAdmin ? ["Studio"] : [])].map((x) => (
             <button
               key={x}
               className={
                 (x === "Our story" && page === "story") ||
                 (x === "Beauty guide" && page === "guide") ||
                 (x === "Account" && page === "account") ||
-                (x !== "Our story" && x !== "Studio" && (page === "shop" || page === "product")) ||
+                ((x === category || (x === "Shop all" && category === "All")) && (page === "shop" || page === "product")) ||
                 (x === "Studio" && page === "admin")
                   ? "active"
                   : ""
@@ -405,6 +389,7 @@ export default function App() {
                   go("account");
                   return;
                 }
+                resetShop();
                 setCategory(x === "Shop all" || x === "Our story" || x === "Beauty guide" ? "All" : x);
                 go(x === "Our story" ? "story" : x === "Beauty guide" ? "guide" : "shop");
               }}
@@ -416,23 +401,12 @@ export default function App() {
         </>
       )}
       {search && (
-        <div className="search-bar">
-          <Search size={20} />
-          <input
-            autoFocus
-            placeholder="Search makeup, skincare, rituals..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          <button
-            onClick={() => {
-              go("shop");
-              setSearch(false);
-            }}
-          >
-            Search
-          </button>
-        </div>
+        <form className="search-bar" role="search" onSubmit={event => { event.preventDefault(); setQuery(query.trim()); go("shop"); }}>
+          <label htmlFor="header-search"><Search size={20} /><span className="sr-only">Search the collection</span></label>
+          <input id="header-search" autoFocus type="search" placeholder="Search products or categories" value={query} onChange={event => setQuery(event.target.value)} />
+          <button type="submit">Search</button>
+          <button type="button" aria-label="Close search" onClick={() => setSearch(false)}><X size={20} /></button>
+        </form>
       )}
       <main>
         {["home", "shop", "product"].includes(page) && catalogState !== "ready" && <div className="discovery-status" role={catalogState === "error" ? "alert" : "status"}>{catalogState === "loading" ? "Loading the collection…" : <>The collection is temporarily unavailable. <button onClick={() => window.dispatchEvent(new Event("blg:catalog-updated"))}>Try again</button></>}</div>}
@@ -446,13 +420,12 @@ export default function App() {
         {page === "home" && (
           <Home
             {...discovery}
-            shop={() => go("shop")}
+            shop={() => browseCategory("All")}
+            categories={shopCategories}
+            catalogState={catalogState}
             story={() => go("story")}
             show={show}
-            category={(x: string) => {
-              setCategory(x);
-              go("shop");
-            }}
+            category={browseCategory}
             add={add}
             note={note}
           />
@@ -461,6 +434,13 @@ export default function App() {
           <Shop
             {...discovery}
             items={items}
+            categories={shopCategories}
+            catalogState={catalogState}
+            catalogCount={products.length}
+            minPrice={minPrice} setMinPrice={setMinPrice}
+            maxPrice={maxPrice} setMaxPrice={setMaxPrice}
+            availability={availability} setAvailability={setAvailability}
+            resetFilters={resetFilters} resetShop={resetShop}
             category={category}
             setCategory={setCategory}
             sort={sort}
@@ -476,15 +456,15 @@ export default function App() {
         {page === "guide" && (
           <BeautyGuide
             shopLips={() => {
-              setCategory("Lips");
-              go("shop");
+              browseCategory(shopCategories.some(c => c.name === "Lips") ? "Lips" : "All");
             }}
           />
         )}{" "}
-        {page === "product" && active && (
-          <Detail {...discovery} key={active.id} bag={cart} product={products.find(p => p.id === active.id) ?? active} back={() => go("shop")} add={add} signedIn={Boolean(user)} signIn={() => { setReviewReturn(true); go("account"); }} />
+        {page === "product" && activeProduct && (
+          <Detail {...discovery} catalogReady={catalogState === "ready"} key={activeProduct.id} bag={cart} product={activeProduct} back={() => go("shop")} add={add} signedIn={Boolean(user)} signIn={() => { setReviewReturn(true); go("account"); }} />
         )}{" "}
-        {page === "product" && active && catalogState === "ready" && <DiscoveryShelf title="You may also like" items={relatedProducts(active, products)} show={show} add={add} {...discovery} />}
+        {page === "product" && catalogState === "ready" && !activeProduct && <section className="storefront-empty"><h1>Product unavailable</h1><p>This product is no longer in the current collection.</p><button className="btn dark" onClick={() => go("shop")}>Explore the collection</button></section>}
+        {page === "product" && activeProduct && catalogState === "ready" && <DiscoveryShelf title="You may also like" items={relatedProducts(activeProduct, products)} show={show} add={add} {...discovery} />}
         {["shop", "product"].includes(page) && catalogState === "ready" && <DiscoveryShelf title="Recently viewed" items={recentProducts(recent, products, page === "product" ? active?.id : undefined)} show={show} add={add} {...discovery} />}
         {page === "account" && <Account key={customerId ?? "signed-out"} user={user} setUser={setUser} note={note} add={add} wishlistView={<WishlistView favorites={favorites} catalogState={catalogState} show={show} add={add} favoriteSignIn={favoriteSignIn} goShop={() => go("shop")} />} reorder={reorder} goShop={() => go("shop")} authIntent={authIntent} clearAuthIntent={() => setAuthIntent("normal")} />}{" "}
         {page === "admin" && <AdminGuard user={user} go={go} note={note} />}{" "}
@@ -519,10 +499,12 @@ export default function App() {
           />
         )}
       </main>
-      <Footer go={go} />
+      <Footer go={go} shopNewest={() => { resetShop(); setSort("Newest"); go("shop"); }} shopAll={() => browseCategory("All")} />
       <Cart
+        catalog={products} catalogState={catalogState}
+        browse={() => { setCartOpen(false); browseCategory("All"); }}
         reorderResult={reorderResult}
-        stockError={bagStockError(cart, products)}
+        stockError={bagIssue}
         canIncrement={(id: number) => availableQuantity(id, products.find(p => p.id === id)?.inventory, cart) > 0}
         open={cartOpen}
         close={() => { setCartOpen(false); setReorderResult(null); }}
@@ -548,7 +530,7 @@ export default function App() {
         }}
       />
       {toast && (
-        <div className="toast">
+        <div className="toast" role="status">
           <Check size={17} />
           {toast}
         </div>
@@ -584,7 +566,7 @@ function Header({ count, page, isAdmin, go, cart, menu, search }: any) {
     </header>
   );
 }
-function Home({ shop, story, show, category, add, note, favorites, favoriteSignIn }: any) {
+function Home({ shop, story, show, category, categories, catalogState, add, note, favorites, favoriteSignIn }: any) {
   return (
     <>
       <section className="hero">
@@ -613,22 +595,23 @@ function Home({ shop, story, show, category, add, note, favorites, favoriteSignI
           </div>
         </div>
       </section>
-      <section className="section">
-        <Head eyebrow="SHOP BY MOOD" title="A ritual for every version of you." action={shop} />
+      {catalogState === "ready" && categories.length > 0 && <section className="section">
+        <Head eyebrow="SHOP BY CATEGORY" title="A ritual for every version of you." action={shop} />
         <div className="category-grid">
-          {categories.map(([name, img]) => (
+          {categories.map(({ name, image }: { name: string; image: string }) => (
             <button className="category-card" key={name} onClick={() => category(name)}>
-              <img src={img} alt={name} />
+              <img src={image} alt="" loading="lazy" />
               <span>{name}</span>
               <ArrowRight size={20} />
             </button>
           ))}
         </div>
-      </section>
+      </section>}
       <section className="featured">
         <Head eyebrow="THE EDIT" title="Made for main-character energy." action={shop} />
+        {catalogState === "ready" && !products.length && <p className="storefront-empty">The collection is being refreshed. Please check back soon.</p>}
         <div className="product-grid">
-          {products.slice(0, 4).map((p) => (
+          {(catalogState === "ready" ? products : []).slice(0, 4).map((p) => (
             <Card key={p.id} p={p} show={show} add={add} note={note} favorites={favorites} favoriteSignIn={favoriteSignIn} />
           ))}
         </div>
@@ -674,8 +657,8 @@ function Card({ p, show, add, favorites, favoriteSignIn }: any) {
   return (
     <article className="card">
       <FavoriteButton id={p.id} name={p.name} favorites={favorites} signIn={() => favoriteSignIn(p)} />
-      <button className="product-img" onClick={() => show(p)}>
-        <img src={p.image} alt={p.name} />
+      <button className="product-img" aria-label={`View ${p.name}`} onClick={() => show(p)}>
+        <img src={p.image} alt={p.name} loading="lazy" />
         {(p.badge || p.new) && <span className="badge">{p.badge || "New"}</span>}
         <span className="quick">
           View product <Plus size={16} />
@@ -692,7 +675,7 @@ function Card({ p, show, add, favorites, favoriteSignIn }: any) {
         <span className="rating">
           {p.reviews > 0 ? <><Star size={14} fill="currentColor" />{p.rating} <small>({p.reviews})</small></> : 'No reviews yet'}
         </span>
-        <button disabled={p.inventory <= 0} onClick={() => p.options?.length ? show(p) : add(p)}>{p.inventory <= 0 ? "Out of stock" : p.options?.length ? "Choose options" : "Add to bag"}</button>
+        <button disabled={!inStock(p.inventory)} onClick={() => p.options?.length ? show(p) : add(p)}>{!inStock(p.inventory) ? "Out of stock" : p.options?.length ? "Choose options" : "Add to bag"}</button>
       </div>
     </article>
   );
@@ -710,74 +693,28 @@ function WishlistView({ favorites, catalogState, show, add, favoriteSignIn, goSh
     return p ? <Card key={id} p={p} show={show} add={add} favorites={favorites} favoriteSignIn={favoriteSignIn} /> : <article className="unavailable-favorite" key={id}><h3>Product no longer available</h3><p>This saved item is no longer in the collection.</p><FavoriteButton inline id={id} name="unavailable product" favorites={favorites} signIn={goShop} /></article>;
   })}</div> : <div className="portal-empty"><h3>Your wishlist is waiting for you.</h3><p>Tap a heart in the collection to save something you love.</p><button className="btn dark" onClick={goShop}>Explore the shop</button></div>}</section>;
 }
-function Shop({ items, category, setCategory, sort, setSort, query, setQuery, show, add, note, favorites, favoriteSignIn }: any) {
-  const cats = ["All", "Complexion", "Lips", "Eyes", "Cheeks", "Skincare"];
-  return (
-    <section className="shop">
-      <div className="page-title">
-        <p className="eyebrow">THE COLLECTION</p>
-        <h1>
-          Find your new <em>favourite.</em>
-        </h1>
-        <p>High-performance essentials made to make you feel seen.</p>
-      </div>
-      <div className="toolbar">
-        <div className="pills">
-          {cats.map((x) => (
-            <button
-              className={category === x ? "selected" : ""}
-              onClick={() => setCategory(x)}
-              key={x}
-            >
-              {x}
-            </button>
-          ))}
-        </div>
-        <div className="sort">
-          <SlidersHorizontal size={17} />
-          <select aria-label="Sort products" value={sort} onChange={(e) => setSort(e.target.value)}>
-            <option>Featured</option>
-            <option>Top rated</option>
-            <option>Price: low to high</option>
-            <option>Price: high to low</option>
-          </select>
-        </div>
-      </div>
-      <div className="results">
-        <span>{items.length} products</span>
-        <div>
-          <Search size={16} />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            aria-label="Search collection"
-            placeholder="Search collection"
-          />
-        </div>
-      </div>
-      <div className="product-grid">
-        {items.map((p: Product) => (
-          <Card p={p} key={p.id} show={show} add={add} note={note} favorites={favorites} favoriteSignIn={favoriteSignIn} />
-        ))}
-      </div>
-      {!items.length && (
-        <div className="empty">
-          <Search size={30} />
-          <h3>No matches yet</h3>
-          <p>Try another search or explore every ritual.</p>
-          <button
-            className="btn dark"
-            onClick={() => {
-              setCategory("All");
-              setQuery("");
-            }}
-          >
-            See everything
-          </button>
-        </div>
-      )}
-    </section>
-  );
+function Shop({ items, categories, catalogState, catalogCount, category, setCategory, sort, setSort, query, setQuery, minPrice, setMinPrice, maxPrice, setMaxPrice, availability, setAvailability, resetFilters, resetShop, show, add, favorites, favoriteSignIn }: any) {
+  const rangeError = priceRangeError(minPrice, maxPrice);
+  const activeFilters = Number(category !== "All") + Number(Boolean(minPrice || maxPrice)) + Number(availability !== "all");
+  return <section className="shop">
+    <div className="page-title"><p className="eyebrow">THE COLLECTION</p><h1>Find your new <em>favourite.</em></h1><p>Explore the collection at your pace.</p></div>
+    <div className="shop-controls">
+      <div className="shop-search" role="search"><label htmlFor="shop-search">Search the collection</label><div><Search size={18} /><input id="shop-search" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Product, category or description" />{query && <button type="button" onClick={() => setQuery("")} aria-label="Clear search"><X size={18} /></button>}</div></div>
+      <label className="shop-category">Category<select value={category} onChange={event => setCategory(event.target.value)}><option value="All">All products</option>{categories.map((item: { name: string }) => <option key={item.name} value={item.name}>{item.name}</option>)}{category !== "All" && !categories.some((item: { name: string }) => item.name === category) && <option value={category}>{category} (unavailable)</option>}</select></label>
+      <label className="shop-sort">Sort products<select value={sort} onChange={event => setSort(event.target.value)}><option>Featured</option><option>Newest</option><option>Top rated</option><option>Price: low to high</option><option>Price: high to low</option></select></label>
+    </div>
+    <details className="shop-filters"><summary><SlidersHorizontal size={17} /> Price &amp; availability{activeFilters > 0 && <span>{activeFilters} active</span>}</summary><div>
+      <label>Minimum price (CAD)<input type="number" min="0" step="0.01" inputMode="decimal" value={minPrice} onChange={event => setMinPrice(event.target.value)} aria-invalid={Boolean(rangeError)} aria-describedby={rangeError ? "price-filter-error" : undefined} placeholder="No minimum" /></label>
+      <label>Maximum price (CAD)<input type="number" min="0" step="0.01" inputMode="decimal" value={maxPrice} onChange={event => setMaxPrice(event.target.value)} aria-invalid={Boolean(rangeError)} aria-describedby={rangeError ? "price-filter-error" : undefined} placeholder="No maximum" /></label>
+      <label>Availability<select value={availability} onChange={event => setAvailability(event.target.value)}><option value="all">All availability</option><option value="in-stock">In stock</option><option value="out-of-stock">Out of stock</option></select></label>
+    </div></details>
+    {rangeError && <p id="price-filter-error" role="alert">{rangeError}</p>}
+    <div className="shop-result-summary"><p role="status">{catalogState === "ready" ? items.length + (items.length === 1 ? " product" : " products") : catalogState === "loading" ? "Loading products..." : "Products unavailable"}{query.trim() && <> matching <b>{query.trim()}</b></>}{category !== "All" && <> in <b>{category}</b></>}</p>{activeFilters > 0 && <button className="text" onClick={resetFilters}>Clear filters</button>}</div>
+    {catalogState === "ready" && <>
+      <div className="product-grid">{items.map((p: Product) => <Card key={p.id} p={p} show={show} add={add} favorites={favorites} favoriteSignIn={favoriteSignIn} />)}</div>
+      {!items.length && <div className="storefront-empty"><Search size={30} /><h2>{catalogCount ? "No matching products" : "The collection is being refreshed"}</h2><p>{catalogCount ? "Try a different search or clear your filters to explore the collection." : "Please check back soon for available products."}</p>{catalogCount > 0 && <button className="btn dark" onClick={resetShop}>Reset search &amp; filters</button>}</div>}
+    </>}
+  </section>;
 }
 function Story({ shop }: any) {
   return (
@@ -944,11 +881,12 @@ function BeautyGuide({ shopLips }: any) {
     </section>
   );
 }
-function Detail({ product, back, add, bag, signedIn, signIn, favorites, favoriteSignIn }: any) {
+function Detail({ product, back, add, bag, signedIn, signIn, favorites, favoriteSignIn, catalogReady = true }: any) {
   const remaining = availableQuantity(product.id, product.inventory, bag);
   const [selected, setSelected] = useState<Record<string, string>>({}),
     [optionError, setOptionError] = useState(""),
     [qty, setQty] = useState(1);
+  const selection = selectProductOptions(product.options ?? [], selected);
   const images = productImages(product.images, product.image);
   const [activeImage, setActiveImage] = useState<string | null>(null);
   useEffect(() => {
@@ -975,22 +913,23 @@ function Detail({ product, back, add, bag, signedIn, signIn, favorites, favorite
           <p className="desc">{product.description}</p>
           <ProductOptionSelectors groups={product.options ?? []} selected={selected} onChange={value => { const image = associatedImage(images, selected, value); if (image) setActiveImage(image); setSelected(value); setOptionError(""); }} />
           {optionError && <p role="alert">{optionError}</p>}
-          {product.inventory <= 0 ? <p role="status">Out of stock</p> : remaining === 0 ? <p role="status">All available units are already in your bag.</p> : qty > remaining ? <p role="alert">Stock has changed. Reduce the quantity to {remaining} or fewer.</p> : null}
+          {!inStock(product.inventory) ? <p role="status">Out of stock</p> : remaining === 0 ? <p role="status">All available units are already in your bag.</p> : qty > remaining ? <p role="alert">Stock has changed. Reduce the quantity to {remaining} or fewer.</p> : <p className="product-availability" role="status">In stock</p>}
+          {selection.error && <p className="option-guidance">{selection.error}</p>}
           <div className="purchase">
             <div className="quantity">
-              <button onClick={() => setQty(Math.max(1, qty - 1))}>
+              <button aria-label="Decrease quantity" disabled={qty <= 1} onClick={() => setQty(Math.max(1, qty - 1))}>
                 <Minus size={15} />
               </button>
-              {qty}
+              <output aria-label="Quantity">{qty}</output>
               <button aria-label="Increase quantity" disabled={qty >= remaining} onClick={() => setQty(Math.min(remaining, qty + 1))}>
                 <Plus size={15} />
               </button>
             </div>
             <button
               className="btn dark"
-              disabled={remaining <= 0 || qty > remaining}
+              disabled={!catalogReady || remaining <= 0 || qty > remaining || Boolean(selection.error)}
               onClick={() => {
-                if (qty > remaining || remaining <= 0) return;
+                if (!catalogReady || qty > remaining || remaining <= 0) return;
                 const result = selectProductOptions(product.options ?? [], selected);
                 if (result.error) { setOptionError(result.error); return; }
                 add(product, optionSummary(result.choices), result.choices, qty);
@@ -1012,23 +951,18 @@ function Detail({ product, back, add, bag, signedIn, signIn, favorites, favorite
     </section>
   );
 }
-function Cart({ open, close, cart, subtotal, update, remove, checkout, stockError, canIncrement, reorderResult }: any) {
-  const closeButton = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if (!open || !reorderResult) return;
-    const previous = document.activeElement as HTMLElement | null;
-    closeButton.current?.focus();
-    return () => { if (previous?.isConnected) previous.focus(); };
-  }, [open, reorderResult]);
+function Cart({ open, close, cart, subtotal, update, remove, checkout, stockError, canIncrement, reorderResult, catalog, catalogState, browse }: any) {
+  const panel = useRef<HTMLElement>(null);
+  useShoppingDialog(open, panel, close);
   return (
     <>
       <div className={`overlay ${open ? "show" : ""}`} onClick={close} />
-      <aside className={`drawer ${open ? "open" : ""}`}>
+      <aside ref={panel} className={`drawer ${open ? "open" : ""}`} role="dialog" aria-modal={open ? true : undefined} aria-label="Your bag" aria-hidden={!open} inert={!open}>
         <div className="drawer-head">
           <h2>
             Your bag <small>({cart.reduce((s: number, x: CartLine) => s + x.quantity, 0)})</small>
           </h2>
-          <button ref={closeButton} className="icon" aria-label="Close bag" onClick={close}>
+          <button className="icon" aria-label="Close bag" onClick={close}>
             <X />
           </button>
         </div>
@@ -1042,23 +976,26 @@ function Cart({ open, close, cart, subtotal, update, remove, checkout, stockErro
                   <div>
                     <p>{x.category}</p>
                     <b>{x.name}</b>
-                    <span>{x.shade}</span>
+                    <span>{x.selected_options?.length ? optionSummary(x.selected_options) : x.shade}</span>
+                    <span>{money(x.price)} each</span>
+                    {x.previousPrice !== undefined && x.previousPrice !== x.price && <small className="bag-item-notice">Price updated from {money(x.previousPrice)} to the current {money(x.price)}.</small>}
+                    {catalogState === "ready" && bagItemIssue(x, catalog, cart) && <p className="bag-item-notice" role="status">{bagItemIssue(x, catalog, cart)}</p>}
                     <div className="line-foot">
                       <div className="mini-qty">
-                        <button onClick={() => update(cartLineKey(x), -1)}>
+                        <button aria-label={`Decrease quantity of ${x.name}`} disabled={x.quantity <= 1} onClick={() => update(cartLineKey(x), -1)}>
                           <Minus size={13} />
                         </button>
-                        {x.quantity}
-                        <button disabled={!canIncrement(x.id)} onClick={() => update(cartLineKey(x), 1)}>
+                        <output aria-label={`Quantity of ${x.name}`}>{x.quantity}</output>
+                        <button aria-label={`Increase quantity of ${x.name}`} disabled={catalogState !== "ready" || !canIncrement(x.id) || Boolean(bagItemIssue(x, catalog, cart))} onClick={() => update(cartLineKey(x), 1)}>
                           <Plus size={13} />
                         </button>
                       </div>
-                      <button onClick={() => remove(cartLineKey(x))}>
+                      <button aria-label={`Remove ${x.name} from bag`} onClick={() => remove(cartLineKey(x))}>
                         <Trash2 size={16} />
                       </button>
                     </div>
                   </div>
-                  <strong>{money(x.price * x.quantity)}</strong>
+                  <strong aria-label={`Line total for ${x.name}`}>{money(x.price * x.quantity)}</strong>
                 </div>
               ))}
             </div>
@@ -1069,7 +1006,7 @@ function Cart({ open, close, cart, subtotal, update, remove, checkout, stockErro
               </div>
               <small>Shipping is confirmed at checkout.</small>
               {stockError && <p role="alert">{stockError}</p>}
-              <button className="btn dark" onClick={checkout}>
+              <button className="btn dark" disabled={Boolean(stockError) || catalogState !== "ready"} onClick={checkout}>
                 Secure checkout <ArrowRight size={17} />
               </button>
               <button className="continue" onClick={close}>
@@ -1082,8 +1019,8 @@ function Cart({ open, close, cart, subtotal, update, remove, checkout, stockErro
             <ShoppingBag size={37} />
             <h3>Your bag is waiting.</h3>
             <p>Fill it with the little things that make you glow.</p>
-            <button className="btn dark" onClick={close}>
-              Shop now
+            <button className="btn dark" onClick={browse}>
+              Explore the shop
             </button>
           </div>
         )}
@@ -2284,7 +2221,7 @@ function AdminSettings({ settings, setSettings, save }: any) {
     </form>
   );
 }
-function Footer({ go }: any) {
+function Footer({ go, shopNewest, shopAll }: any) {
   return (
     <footer>
       <div className="footer-top">
@@ -2300,8 +2237,8 @@ function Footer({ go }: any) {
         </div>
         <div>
           <h4>Shop</h4>
-          <button onClick={() => go("shop")}>New arrivals</button>
-          <button onClick={() => go("shop")}>Best sellers</button>
+          <button onClick={shopNewest ?? (() => go("shop"))}>New arrivals</button>
+          <button onClick={shopAll ?? (() => go("shop"))}>All products</button>
           <button onClick={() => go("shop")}>Skincare</button>
         </div>
         <div>
