@@ -1,0 +1,64 @@
+.customer-portal { max-width: 1160px; margin-inline: auto; }
+.customer-portal > header h1 { font-size: clamp(32px, 4vw, 48px); margin-bottom: 12px; overflow-wrap: anywhere; }
+.customer-portal > header p:not(.eyebrow) { color: var(--muted); overflow-wrap: anywhere; }
+.customer-portal > nav { display: flex; flex-wrap: wrap; gap: 8px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+.customer-portal > nav button { min-height: 44px; padding: 10px 16px; white-space: normal; }
+.portal-overview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.portal-card, .portal-empty { padding: clamp(20px, 3vw, 32px); border: 1px solid var(--line); background: var(--cream); min-width: 0; }
+.portal-card h2, .portal-order-tools h2 { margin: 0 0 16px; font-size: 25px; }
+.portal-card p, .portal-empty p { line-height: 1.7; overflow-wrap: anywhere; }
+.portal-card .text { min-height: 44px; text-align: left; }
+.portal-recent { grid-column: 1 / -1; }
+.recent-order { display: grid; grid-template-columns: minmax(0, 1.2fr) repeat(3, minmax(0, 1fr)); gap: 12px; width: 100%; text-align: left; padding: 18px 0; border-bottom: 1px solid var(--line); color: var(--ink); }
+.recent-order > * { overflow-wrap: anywhere; }
+.customer-portal .account-form { max-width: 640px; width: 100%; padding: clamp(18px, 3vw, 30px); border: 1px solid var(--line); background: var(--cream); }
+.customer-portal .account-form h2 { margin-top: 0; font-size: 27px; }
+.customer-portal .account-form > h2, .customer-portal .account-form > p, .customer-portal .account-form > small, .customer-portal .profile-email { grid-column: 1 / -1; margin: 0; }
+.customer-portal .account-form label { display: grid; gap: 8px; margin: 0; }
+.profile-email { min-width: 0; padding: 12px 0; font-size: 14px; }
+.profile-email p { margin: 8px 0; overflow-wrap: anywhere; }
+.customer-portal .account-form p, .customer-portal .account-form small { color: var(--muted); line-height: 1.6; }
+.customer-portal .account-form input { max-width: 100%; }
+.customer-portal input[readonly] { color: var(--muted); }
+.account-feedback { padding: 14px 18px; border: 1px solid var(--line); line-height: 1.6; }
+.portal-order-tools { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; margin-bottom: 24px; }
+.portal-order-tools h2 { margin: 0; flex: 1; }
+.portal-order-tools label { display: grid; gap: 6px; font-size: 13px; }
+.portal-orders .portal-order-card { padding: 0; margin-block: 18px; border: 1px solid var(--line); background: var(--cream); overflow-wrap: anywhere; }
+.portal-orders .order-open { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 24px; padding: 22px; width: 100%; text-align: left; color: var(--ink); }
+.portal-orders .order-open > * { min-width: 0; overflow-wrap: anywhere; }
+.portal-orders .order-open b { font-size: 21px; }
+.portal-orders .order-open time, .portal-orders .order-open span { font-size: 14px; }
+.order-detail-link { grid-column: 1 / -1; text-decoration: underline; text-underline-offset: 4px; }
+.portal-order-actions { display: flex; gap: 16px; align-items: center; padding: 0 22px 22px; }
+.portal-order-actions .btn { min-height: 44px; border: 1px solid var(--line); flex-shrink: 0; }
+.portal-order-actions small { color: var(--muted); line-height: 1.6; }
+.portal-orders .customer-order-detail { display: block; padding: 22px; border-top: 1px solid var(--line); }
+.portal-orders .customer-order-detail[hidden] { display: none; }
+.portal-orders .customer-order-detail p { font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+.portal-orders .historical-items { list-style: none; padding: 0; margin: 0; }
+.historical-items li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; padding: 18px 0; border-bottom: 1px solid var(--line); }
+.historical-items li div { min-width: 0; }
+.historical-items li b { font-size: 17px; }
+.historical-items li span { font-size: 13px; color: var(--muted); }
+.portal-orders .historical-items p { margin: 7px 0; }
+.historical-delivery { padding-block: 12px; }
+.portal-orders .historical-delivery p { margin: 6px 0; }
+.historical-totals { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; border-top: 1px solid var(--line); padding-top: 20px; }
+.historical-totals dd { margin: 0; text-align: right; }
+.historical-totals dt:last-of-type, .historical-totals dd:last-of-type { font-weight: 600; }
+.reorder-result { margin: 16px 0; padding: 16px 20px; border: 1px solid var(--line); color: var(--ink); background: var(--cream); font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.reorder-result p { margin: 0; }
+.reorder-result ul { padding-left: 20px; margin-bottom: 0; }
+.drawer > .reorder-result { margin: 0 18px 12px; max-height: 28vh; overflow-y: auto; flex-shrink: 0; }
+@media (max-width: 600px) {
+  .portal-overview { grid-template-columns: minmax(0, 1fr); }
+  .recent-order { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .customer-portal > nav button { flex: 1 1 auto; padding-inline: 10px; }
+  .portal-orders .order-open { grid-template-columns: minmax(0, 1fr); padding: 18px; }
+  .portal-order-actions { align-items: flex-start; flex-direction: column; padding: 0 18px 18px; gap: 10px; }
+  .portal-orders .customer-order-detail { padding: 18px; }
+  .historical-items li { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .portal-order-tools { align-items: stretch; }
+  .portal-order-tools label { width: 100%; }
+}

@@ -60,7 +60,8 @@ import {
   getManualOrderSummary,
   getPublicPaymentSettings,
 } from "./lib/manual-payment";
-import { getCustomerAccount, getCustomerDelivery, saveCustomerAddress, saveCustomerProfile, toggleWishlist } from "./lib/customer";
+import { getCustomerAccount, getCustomerDelivery, getReorderItems, saveCustomerAddress, saveCustomerProfile, toggleWishlist } from "./lib/customer";
+import { planReorder } from "./lib/reorder";
 import { clearAuthCallbackUrl, friendlyAuthError, getAuthRedirectUrl, isAuthRateLimited } from "./lib/auth";
 import { sendOrderEmail } from "./lib/order-email";
 import { PaymentConfirmationEmailAction } from "./PaymentConfirmationEmailAction";
@@ -70,6 +71,7 @@ import "./layout-spacing.css";
 import "./product-media-reviews.css";
 import "./order-fulfillment.css";
 import "./checkout-polish.css";
+import "./customer-portal.css";
 import { PaymentMethodOptions } from "./PaymentMethodOptions";
 import { ProductGallery } from "./ProductGallery";
 import { ProductImagesEditor } from "./ProductImagesEditor";
@@ -213,6 +215,31 @@ export default function App() {
   const show = (p: Product) => {
     setActive(p);
     go("product");
+  };
+  const latestBag = useRef(cart);
+  const reorderOwner = useRef(customerId);
+  const reorderLock = useRef(false);
+  const [reorderResult, setReorderResult] = useState<{ message: string; notices: string[] } | null>(null);
+  useEffect(() => { latestBag.current = cart; }, [cart]);
+  useEffect(() => { reorderOwner.current = customerId; setReorderResult(null); }, [customerId]);
+  const reorder = async (orderId: string, ownerId: string) => {
+    if (reorderLock.current || !ownerId || reorderOwner.current !== ownerId) throw new Error("Reorder unavailable");
+    reorderLock.current = true;
+    try {
+      const [items, catalog] = await Promise.all([getReorderItems(orderId, ownerId), fetchProducts()]);
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      if (currentUser?.id !== ownerId || reorderOwner.current !== ownerId) throw new Error("Sign in required");
+      const result = planReorder<Product>(items, catalog, latestBag.current);
+      products.splice(0, products.length, ...catalog);
+      setCatalogVersion(value => value + 1);
+      if (result.added) {
+        latestBag.current = result.cart;
+        setCart(result.cart);
+        setReorderResult(result);
+        setCartOpen(true);
+      }
+      return result;
+    } finally { reorderLock.current = false; }
   };
   const subtotal = cart.reduce((s, x) => s + x.price * x.quantity, 0);
   const items = useMemo(() => {
@@ -433,7 +460,7 @@ export default function App() {
         {page === "product" && active && (
           <Detail key={active.id} bag={cart} product={products.find(p => p.id === active.id) ?? active} back={() => go("shop")} add={add} signedIn={Boolean(user)} signIn={() => { setReviewReturn(true); go("account"); }} />
         )}{" "}
-        {page === "account" && <Account key={customerId ?? "signed-out"} user={user} setUser={setUser} note={note} add={add} goShop={() => go("shop")} authIntent={authIntent} clearAuthIntent={() => setAuthIntent("normal")} />}{" "}
+        {page === "account" && <Account key={customerId ?? "signed-out"} user={user} setUser={setUser} note={note} add={add} reorder={reorder} goShop={() => go("shop")} authIntent={authIntent} clearAuthIntent={() => setAuthIntent("normal")} />}{" "}
         {page === "admin" && <AdminGuard user={user} go={go} note={note} />}{" "}
         {page === "checkout" && (
           <Checkout
@@ -468,10 +495,11 @@ export default function App() {
       </main>
       <Footer go={go} />
       <Cart
+        reorderResult={reorderResult}
         stockError={bagStockError(cart, products)}
         canIncrement={(id: number) => availableQuantity(id, products.find(p => p.id === id)?.inventory, cart) > 0}
         open={cartOpen}
-        close={() => setCartOpen(false)}
+        close={() => { setCartOpen(false); setReorderResult(null); }}
         cart={cart}
         subtotal={subtotal}
         update={(key: string, n: number) =>
@@ -950,7 +978,14 @@ function Detail({ product, back, add, bag, signedIn, signIn }: any) {
     </section>
   );
 }
-function Cart({ open, close, cart, subtotal, update, remove, checkout, stockError, canIncrement }: any) {
+function Cart({ open, close, cart, subtotal, update, remove, checkout, stockError, canIncrement, reorderResult }: any) {
+  const closeButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open || !reorderResult) return;
+    const previous = document.activeElement as HTMLElement | null;
+    closeButton.current?.focus();
+    return () => { if (previous?.isConnected) previous.focus(); };
+  }, [open, reorderResult]);
   return (
     <>
       <div className={`overlay ${open ? "show" : ""}`} onClick={close} />
@@ -959,10 +994,11 @@ function Cart({ open, close, cart, subtotal, update, remove, checkout, stockErro
           <h2>
             Your bag <small>({cart.reduce((s: number, x: CartLine) => s + x.quantity, 0)})</small>
           </h2>
-          <button className="icon" onClick={close}>
+          <button ref={closeButton} className="icon" aria-label="Close bag" onClick={close}>
             <X />
           </button>
         </div>
+        {reorderResult && <div className="reorder-result" role="status"><p>{reorderResult.message}</p>{reorderResult.notices.length > 0 && <ul>{reorderResult.notices.map((text: string, index: number) => <li key={index}>{text}</li>)}</ul>}</div>}
         {cart.length ? (
           <>
             <div className="lines">
@@ -1425,7 +1461,7 @@ Thank you.`;
     </section>
   );
 }
-function Account({ user, setUser, note, add, goShop, authIntent, clearAuthIntent }: any) {
+function Account({ user, setUser, note, add, reorder, goShop, authIntent, clearAuthIntent }: any) {
   const [mode, setMode] = useState<"signin" | "signup" | "reset" | "confirm">("signin");
   const [email, setEmail] = useState(""), [password, setPassword] = useState(""), [confirmPassword, setConfirmPassword] = useState("");
   const [firstName, setFirstName] = useState(""), [lastName, setLastName] = useState(""), [busy, setBusy] = useState(false);
@@ -1485,7 +1521,7 @@ function Account({ user, setUser, note, add, goShop, authIntent, clearAuthIntent
     finally { requestLock.current = false; setBusy(false); }
   };
   if (authIntent === "recovery") return <RecoveryPassword note={note} done={clearAuthIntent} />;
-  if (user) return <section className="account-page"><CustomerDashboard setUser={setUser} note={note} add={add} goShop={goShop} /></section>;
+  if (user) return <section className="account-page"><CustomerDashboard setUser={setUser} note={note} add={add} reorder={reorder} goShop={goShop} /></section>;
   return <section className="account-page"><div className="account-card">
     {mode === "confirm" ? <><p className="eyebrow">CHECK YOUR EMAIL</p><h1>Check your email.</h1><p>We’ve asked Supabase to send a confirmation link to <b>{email}</b>. Delivery can sometimes take a few minutes.</p>{existingUnconfirmed && <p className="auth-hint">An account with this email is waiting for confirmation. Check your inbox or request a new confirmation email when available.</p>}<div className="auth-delivery-help"><b>Didn’t receive it?</b><span>Check Spam or Junk, confirm the email address above is correct, and wait a few minutes before requesting another email.</span></div><button className="btn dark" disabled={busy || cooldownSeconds > 0} onClick={() => void resendConfirmation()}>{busy ? "Requesting…" : cooldownSeconds ? `Resend available in ${cooldownSeconds}s` : "Resend confirmation email"}</button><div className="account-switch"><button onClick={correctEmail}>Wrong email? Change email address</button><small>Changing this field does not update an existing account. Edit it, then explicitly create an account with the corrected address.</small><button onClick={() => changeMode("signin")}>Already confirmed your email? Sign in</button></div></> : <>
       <p className="eyebrow">{mode === "signup" ? "CREATE ACCOUNT" : mode === "reset" ? "RESET PASSWORD" : "WELCOME IN"}</p><h1>{mode === "signup" ? "Let’s make it official." : mode === "reset" ? "Reset your password." : "Welcome back."}</h1>
@@ -1508,7 +1544,7 @@ function RecoveryPassword({ note, done }: any) {
   };
   return <section className="account-page"><div className="account-card"><p className="eyebrow">CHOOSE A NEW PASSWORD</p><h1>Secure your account.</h1><form onSubmit={submit}><label>New password<input required minLength={6} type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label><label>Confirm new password<input required minLength={6} type="password" autoComplete="new-password" value={confirm} onChange={(event) => setConfirm(event.target.value)} /></label><button className="btn dark" disabled={busy}>{busy ? "Updating…" : "Update password"}</button></form></div></section>;
 }
-function CustomerDashboard({ setUser, note, add, goShop }: any) {
+function CustomerDashboard({ setUser, note, add, reorder, goShop }: any) {
   const [data, setData] = useState<any>(null);
   const [tab, setTab] = useState("Overview");
   const [busy, setBusy] = useState(false);
@@ -1516,6 +1552,7 @@ function CustomerDashboard({ setUser, note, add, goShop }: any) {
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
   const load = useCallback(async () => {
     setLoading(true); setLoadFailed(false);
     try { setData(await getCustomerAccount()); }
@@ -1526,15 +1563,15 @@ function CustomerDashboard({ setUser, note, add, goShop }: any) {
   if (loading) return <section className="account-page"><p role="status">Loading your account...</p></section>;
   if (loadFailed || !data) return <section className="account-page"><div className="account-card"><h2>Account temporarily unavailable</h2><p role="alert">We could not load your account. Please check your connection and try again.</p><button type="button" className="btn dark" onClick={() => void load()}>Retry</button></div></section>;
   const profile = data.profile ?? {};
-  const orders = data.orders ?? [];
+  const orders = [...(data.orders ?? [])].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   const address = data.address ?? {};
   const wish = data.wishlist ?? [];
   const updateProfile = (key: string, value: string) => setData((current: any) => ({ ...current, profile: { ...current.profile, [key]: value } }));
   const updateAddress = (key: string, value: string) => setData((current: any) => ({ ...current, address: { ...(current.address ?? {}), [key]: value } }));
   const save = async (fn: () => Promise<void>, message: string) => {
-    setBusy(true);
-    try { await fn(); await load(); note(message); }
-    catch { note("We could not save your changes."); }
+    setBusy(true); setSaveMessage("");
+    try { await fn(); await load(); setSaveMessage(message); note(message); }
+    catch { setSaveMessage("We could not save your changes. Please try again."); }
     finally { setBusy(false); }
   };
   const saveAddress = () => {
@@ -1543,20 +1580,67 @@ function CustomerDashboard({ setUser, note, add, goShop }: any) {
     if (addressIsCanada && !/^[ABCEGHJKLMNPRSTVXY]\d[A-Z]\d[A-Z]\d$/.test(postal)) { note("Enter a valid Canadian postal code."); return; }
     void save(() => saveCustomerAddress({ ...address, postal_code: addressIsCanada ? `${postal.slice(0, 3)} ${postal.slice(3)}` : (address.postal_code ?? "").trim() }, data.user.id), "Default delivery address saved.");
   };
-  return <section className="customer-account"><header><p className="eyebrow">MY ACCOUNT</p><h1>Welcome back, {profile.first_name || data.user.email.split("@")[0]}.</h1></header><nav>{["Overview", "My Orders", "Profile", "Addresses", "Wishlist", "Security"].map((x) => <button className={tab === x ? "active" : ""} onClick={() => setTab(x)} key={x}>{x}</button>)}<button onClick={async () => { await supabase.auth.signOut(); setUser(null); }}>Sign out</button></nav><main>
-    {tab === "Overview" && <div className="account-summary"><article><b>{orders.length}</b><span>Orders</span></article><article><b>{orders.filter((o: any) => o.payment_status === "awaiting_payment").length}</b><span>Awaiting payment</span></article><article><b>{orders.filter((o: any) => o.payment_status === "paid").length}</b><span>Paid orders</span></article><article><b>{wish.length}</b><span>Saved items</span></article></div>}
-    {tab === "My Orders" && <CustomerOrders orders={orders} refresh={load} />}
-    {tab === "Profile" && <form className="account-form" onSubmit={(event) => { event.preventDefault(); void save(() => saveCustomerProfile(profile), "Profile saved."); }}><label>First name<input value={profile.first_name ?? ""} onChange={(event) => updateProfile("first_name", event.target.value)} /></label><label>Last name<input value={profile.last_name ?? ""} onChange={(event) => updateProfile("last_name", event.target.value)} /></label><label>Email<input disabled value={profile.email ?? ""} /></label><label>Phone<input value={profile.phone ?? ""} onChange={(event) => updateProfile("phone", event.target.value)} /></label><button className="btn dark" disabled={busy}>Save changes</button></form>}
+  return <section className="customer-account customer-portal"><header><p className="eyebrow">MY ACCOUNT</p><h1>{profile.first_name ? `Welcome back, ${profile.first_name}.` : "Welcome to your account."}</h1><p>{data.user.email}</p></header><nav aria-label="Account sections">{["Overview", "My Orders", "Addresses", "Profile", "Wishlist", "Security"].map((x) => <button className={tab === x ? "active" : ""} aria-current={tab === x ? "page" : undefined} onClick={() => { setTab(x); setSaveMessage(""); }} key={x}>{x === "My Orders" ? "Orders" : x === "Addresses" ? "Delivery Details" : x}</button>)}<button onClick={async () => { await supabase.auth.signOut(); setUser(null); }}>Sign out</button></nav><main>
+    {saveMessage && <p className="account-feedback" role="status">{saveMessage}</p>}
+    {tab === "Overview" && <div className="portal-overview">
+      <section className="portal-card"><h2>Your orders</h2><p>{orders.length ? `${orders.length} ${orders.length === 1 ? "order" : "orders"} in your account` : "Your first order is waiting to happen."}</p><button className="text" onClick={() => setTab("My Orders")}>View orders</button></section>
+      <section className="portal-card"><h2>Delivery details</h2><p>{data.address ? [address.address, address.unit, address.city, address.country].filter(Boolean).join(", ") : "Save your delivery details for a quicker checkout next time."}</p><button className="text" onClick={() => setTab("Addresses")}>{data.address ? "Edit saved delivery details" : "Add delivery details"}</button></section>
+      <section className="portal-card portal-recent"><h2>Recent orders</h2>{orders.length ? orders.slice(0, 3).map((order: any) => <button className="recent-order" key={order.id} onClick={() => setTab("My Orders")}><strong>{order.order_reference}</strong><span>{new Date(order.created_at).toLocaleDateString("en-CA")}</span><span>{orderStatusLabel(order.status)}</span><b>{orderMoney(order.total_cents, order.currency ?? "CAD")}</b></button>) : <p>Once you place an order, its details and progress will appear here.</p>}<button className="text" onClick={goShop}>Explore the shop</button></section>
+    </div>}
+    {tab === "My Orders" && <CustomerOrders orders={orders} refresh={load} reorder={reorder ? (id: string) => reorder(id, data.user.id) : undefined} goShop={goShop} />}
+    {tab === "Profile" && <form className="account-form" onSubmit={(event) => { event.preventDefault(); void save(() => saveCustomerProfile(profile, data.user.id), "Profile saved."); }}><h2>Personal details</h2><p>Keep your name and contact number up to date.</p><label>First name<input autoComplete="given-name" value={profile.first_name ?? ""} onChange={(event) => updateProfile("first_name", event.target.value)} /></label><label>Last name<input autoComplete="family-name" value={profile.last_name ?? ""} onChange={(event) => updateProfile("last_name", event.target.value)} /></label><div className="profile-email"><span>Account email</span><p>{data.user.email}</p><small>Your sign-in email is read-only here.</small></div><label>Phone<input type="tel" autoComplete="tel" value={profile.phone ?? ""} onChange={(event) => updateProfile("phone", event.target.value)} /></label><button className="btn dark" disabled={busy}>Save changes</button></form>}
     {tab === "Addresses" && <form className="account-form" onSubmit={(event) => { event.preventDefault(); saveAddress(); }}><h2>Saved delivery details</h2><p>Your default address for future checkouts. Updating it does not change previous orders.</p>{["first_name", "last_name", "phone", "address", "unit", "country", "province", "city", "postal_code"].map((key) => <label key={key}>{key === "province" ? checkoutAddressRules(address.country).regionLabel : key === "postal_code" ? checkoutAddressRules(address.country).postalLabel : key === "unit" ? "Apartment / unit (optional)" : key.replace("_", " ")}<input required={key !== "unit" && (key !== "province" || checkoutAddressRules(address.country).regionRequired) && (key !== "postal_code" || checkoutAddressRules(address.country).postalRequired)} value={address[key] ?? (key === "country" ? "Canada" : "")} onChange={(event) => updateAddress(key, event.target.value)} /></label>)}<button className="btn dark" disabled={busy}>Save delivery details</button></form>}
     {tab === "Wishlist" && <div className="wishlist-grid">{wish.length ? wish.map((row: any) => { const p = row.products; const available = p?.is_active && p?.inventory_quantity > 0; return p && <article key={p.id}><img src={p.image_url} alt={p.name} /><b>{p.name}</b><span>{money(p.price_cents / 100)}</span><small>{available ? "Available" : "Currently unavailable"}</small>{available && <button className="btn dark" onClick={() => add({ id: p.id, name: p.name, category: "Saved item", price: p.price_cents / 100, rating: 0, reviews: 0, image: p.image_url, description: "", shades: ["Universal"], inventory: p.inventory_quantity })}>Add to bag</button>}<button onClick={() => void save(() => toggleWishlist(p.id, true), "Removed from wishlist.")}>Remove</button></article>; }) : <p>Your wishlist is waiting for something beautiful. <button className="text" onClick={goShop}>Explore products</button></p>}</div>}
     {tab === "Security" && <div className="account-form"><p>Use a secure password to protect your account.</p><form onSubmit={(event) => { event.preventDefault(); if (newPassword.length < 6) { note("Use a password with at least 6 characters."); return; } if (newPassword !== confirmNewPassword) { note("Passwords do not match."); return; } void save(async () => { const { error } = await supabase.auth.updateUser({ password: newPassword }); if (error) throw error; setNewPassword(""); setConfirmNewPassword(""); }, "Your password has been updated."); }}><label>New password<input required minLength={6} type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></label><label>Confirm new password<input required minLength={6} type="password" value={confirmNewPassword} onChange={(event) => setConfirmNewPassword(event.target.value)} /></label><button className="btn dark" disabled={busy}>Update password</button></form><button className="text" onClick={async () => { const { error } = await supabase.auth.resetPasswordForEmail(profile.email, { redirectTo: getAuthRedirectUrl() }); note(error ? "We could not send your password-reset link." : "Check your email for a password-reset link."); }}>Send a password-reset link instead</button></div>}
   </main></section>;
 }
-function CustomerOrders({ orders, refresh }: any) {
+function CustomerOrders({ orders, refresh, reorder, goShop }: any) {
   const [filter, setFilter] = useState("all");
   const [detail, setDetail] = useState<string | null>(null);
-  const list = orders.filter((order: any) => filter === "all" || order.payment_status === filter || order.status === filter);
-  return <section className="customer-orders"><button className="text" onClick={() => void refresh()}>Refresh status</button><select aria-label="Filter orders" value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">All Orders</option><option value="awaiting_payment">Awaiting Payment</option><option value="paid">Paid</option><option value="processing">Processing</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="fulfilled">Fulfilled (legacy)</option></select>{list.length ? list.map((order: any) => { const delivery = order.shipping_address ?? {}; const currency = order.currency ?? "CAD"; return <article key={order.id}><button className="order-open" onClick={() => setDetail(detail === order.id ? null : order.id)}><b>Order {order.order_reference}</b><span>{new Date(order.created_at).toLocaleDateString("en-CA")} · {orderMoney(order.total_cents, currency)}</span><span>Payment: {paymentStatusLabel(order.payment_status)} · {orderStatusLabel(order.status)}</span></button>{detail === order.id && <div className="customer-order-detail"><OrderProgress order={order} /><p>{order.payment_status === "paid" ? "Payment successful — your payment has been confirmed." : order.payment_status === "cancelled" ? "This unpaid order was cancelled and its reserved inventory was released." : "Payment awaiting confirmation. If you have sent your receipt, no further action is required unless we contact you."}</p>{order.payment_status === "awaiting_payment" && order.payment_expires_at && <p>Payment requested before {new Date(order.payment_expires_at).toLocaleString("en-CA")}.</p>}<p><b>Delivery</b><br />{[delivery.address, delivery.unit, delivery.city, delivery.province, delivery.postal_code, delivery.country].filter(Boolean).join(", ") || "Delivery details are on file."}</p>{order.order_items.map((item: any, index: number) => <div key={`${item.product_name}-${index}`}><b>{item.product_name}</b><span>{item.shade ? `${item.shade} · ` : ""}Qty {item.quantity} · {orderMoney(item.unit_price_cents, currency)} each · {orderMoney(item.unit_price_cents * item.quantity, currency)}</span></div>)}<p>Merchandise: {orderMoney(order.subtotal_cents, currency)} · Shipping: {orderMoney(order.shipping_cents, currency)} · Total: {orderMoney(order.total_cents, currency)}</p></div>}</article>; }) : <p>You haven’t placed any orders yet.</p>}</section>;
+  const [busy, setBusy] = useState<string | null>(null);
+  const [result, setResult] = useState<{ message: string; notices: string[] } | null>(null);
+  const repeatLock = useRef(false);
+  const repeat = async (id: string) => {
+    if (repeatLock.current || !reorder) return;
+    repeatLock.current = true; setBusy(id); setResult(null);
+    try { setResult(await reorder(id)); }
+    catch { setResult({ message: "We could not prepare your reorder. Please try again. Your bag has not been replaced.", notices: [] }); }
+    finally { repeatLock.current = false; setBusy(null); }
+  };
+  const list = [...orders].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .filter((order: any) => filter === "all" || order.payment_status === filter || order.status === filter);
+  return <section className="customer-orders portal-orders">
+    <div className="portal-order-tools"><h2>Your orders</h2><button className="text" onClick={() => void refresh()}>Refresh status</button>
+      <label>Show orders<select value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">All orders</option><option value="awaiting_payment">Awaiting payment</option><option value="paid">Paid</option><option value="processing">Processing</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="fulfilled">Fulfilled (legacy)</option><option value="cancelled">Cancelled</option><option value="refunded">Refunded</option></select></label>
+    </div>
+    {result && <div className="reorder-result" role="status"><p>{result.message}</p>{result.notices.length > 0 && <ul>{result.notices.map((text, index) => <li key={index}>{text}</li>)}</ul>}</div>}
+    {list.length ? list.map((order: any) => {
+      const delivery = order.shipping_address ?? {}, currency = order.currency ?? "CAD";
+      const itemCount = order.order_items.reduce((total: number, item: any) => total + item.quantity, 0);
+      const expanded = detail === order.id;
+      return <article className="portal-order-card" key={order.id}>
+        <button className="order-open" aria-expanded={expanded} aria-controls={`details-${order.order_reference}`} onClick={() => setDetail(expanded ? null : order.id)}>
+          <b>Order {order.order_reference}</b><time dateTime={order.created_at}>{new Date(order.created_at).toLocaleDateString("en-CA")}</time>
+          <strong>{orderMoney(order.total_cents, currency)}</strong><span>{itemCount} {itemCount === 1 ? "item" : "items"}</span>
+          <span>Payment: {paymentStatusLabel(order.payment_status)}</span><span>{orderStatusLabel(order.status)}</span>
+          <span className="order-detail-link">{expanded ? "Hide order details" : "View order details"}</span>
+        </button>
+        <div className="portal-order-actions"><button className="btn" aria-label={`Reorder ${order.order_reference}`} disabled={Boolean(busy) || !reorder || !itemCount} onClick={() => void repeat(order.id)}>{busy === order.id ? "Checking availability…" : "Reorder"}</button><small>Add available items to your bag at current prices.</small></div>
+        <div id={`details-${order.order_reference}`} hidden={!expanded} className="customer-order-detail">
+          {expanded && <>
+            <OrderProgress order={order} />
+            <p>Payment method: {paymentMethodLabel(order.payment_method)}</p>
+            <p>{order.status === "refunded" ? "This order was refunded." : order.payment_status === "paid" ? "Payment successful — your payment has been confirmed." : order.payment_status === "cancelled" ? "This unpaid order was cancelled." : "Payment awaiting confirmation. If you have sent your receipt, no further action is required unless we contact you."}</p>
+            {order.payment_status === "awaiting_payment" && order.payment_expires_at && <p>Payment requested before {new Date(order.payment_expires_at).toLocaleString("en-CA")}.</p>}
+            <h3>Items in this order</h3>
+            <ul className="historical-items">{order.order_items.map((item: any, index: number) => <li key={index}><div><b>{item.product_name}</b><p>{Array.isArray(item.selected_options) && item.selected_options.length ? optionSummary(item.selected_options) : item.shade}</p><span>Qty {item.quantity} · {orderMoney(item.unit_price_cents, currency)} each</span></div><strong>{orderMoney(item.unit_price_cents * item.quantity, currency)}</strong></li>)}</ul>
+            <div className="historical-delivery"><h3>Delivery for this order</h3>{(delivery.first_name || delivery.last_name) && <p>{[delivery.first_name, delivery.last_name].filter(Boolean).join(" ")}</p>}<p>{[delivery.address, delivery.unit, delivery.city, delivery.province, delivery.postal_code, delivery.country].filter(Boolean).join(", ") || "Delivery details are on file."}</p>{delivery.phone && <p>{delivery.phone}</p>}{delivery.email && <p>{delivery.email}</p>}</div>
+            <dl className="historical-totals"><dt>Subtotal</dt><dd>{orderMoney(order.subtotal_cents, currency)}</dd><dt>Shipping</dt><dd>{orderMoney(order.shipping_cents, currency)}</dd><dt>Total</dt><dd>{orderMoney(order.total_cents, currency)}</dd></dl>
+          </>}
+        </div>
+      </article>;
+    }) : <div className="portal-empty"><h3>{orders.length ? "No orders match this filter." : "Your order history starts here."}</h3><p>{orders.length ? "Choose another status to see your orders." : "You have not placed any orders yet. Explore the shop and find something you love."}</p>{goShop && <button className="btn dark" onClick={goShop}>Explore the shop</button>}</div>}
+  </section>;
 }
 function AdminGuard({ user, go, note }: any) {
   const [isAdmin, setIsAdmin] = useState(false);

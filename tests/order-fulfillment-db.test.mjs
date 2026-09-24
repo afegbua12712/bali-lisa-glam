@@ -20,12 +20,12 @@ test('persistent references and secure fulfillment against the existing order co
     insert into profiles(id,email,role) values('${admin}','admin@example.test','admin'),('${customer}','customer@example.test','customer'),('${other}','other@example.test','customer');
     create table website_settings(id boolean primary key,free_shipping_threshold_cents integer,standard_shipping_cents integer);
     insert into website_settings values(true,7500,1000);
-    alter table orders enable row level security; alter table order_items enable row level security;
+    alter table orders enable row level security; alter table order_items enable row level security; alter table profiles enable row level security;
     grant all on orders,order_items to anon,authenticated;
     grant update(status),insert(customer_id) on orders to authenticated;
     grant select on profiles to anon,authenticated;
     insert into products(name,slug,description,price_cents,image_url,inventory_quantity) values('Fixture','fixture','',1000,'/fixture.png',100);`)
-  await db.exec(base.split('\n').filter(line => line.startsWith('create policy') && /on public.(orders|order_items) /.test(line)).join('\n'))
+  await db.exec(base.split('\n').filter(line => line.startsWith('create policy') && /on public.(profiles|orders|order_items) /.test(line)).join('\n'))
   for (const file of ['20260901120000_stripe_checkout.sql','20260901130000_manual_payment.sql','20260901160000_order_archiving.sql','20260903120000_safe_order_contract.sql','20260911190000_product_options.sql']) await db.exec(read(file))
   await db.exec(read('20260901170000_customer_account.sql'))
   await db.exec('grant select,insert,update,delete on customer_addresses to anon,authenticated;')
@@ -125,5 +125,23 @@ test('persistent references and secure fulfillment against the existing order co
     assert.equal((await db.query('select * from customer_addresses')).rows.length,0)
     await assert.rejects(put(customer),/row-level security/)
     await user(admin);assert.equal((await db.query('select * from customer_addresses')).rows.length,2)
+  })
+  await t.test('account profile and nested order-item reads stay private without weakening permitted profile updates',async()=>{
+    await user(customer)
+    assert.deepEqual((await db.query('select id from profiles')).rows,[{id:customer}])
+    await db.query("update profiles set first_name='Updated',last_name='Customer',phone='1234567890' where id=$1",[customer])
+    assert.equal((await db.query('select first_name from profiles')).rows[0].first_name,'Updated')
+    assert.equal((await db.query("update profiles set first_name='Forbidden' where id=$1 returning id",[other])).rows.length,0)
+    await assert.rejects(db.exec("update profiles set role='admin'"),/permission denied/)
+    const ownedItems=(await db.query('select * from order_items')).rows
+    assert.ok(ownedItems.length>0)
+    await user(other)
+    assert.deepEqual((await db.query('select id from profiles')).rows,[{id:other}])
+    assert.equal((await db.query('select * from orders')).rows.length,0)
+    assert.equal((await db.query('select * from order_items')).rows.length,0)
+    await user('','anon')
+    assert.equal((await db.query('select * from profiles')).rows.length,0)
+    assert.equal((await db.query('select * from orders')).rows.length,0)
+    assert.equal((await db.query('select * from order_items')).rows.length,0)
   })
 })

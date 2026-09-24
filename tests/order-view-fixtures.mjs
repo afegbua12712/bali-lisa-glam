@@ -10,6 +10,7 @@ export function compile(source, dependencies = {}) {
 }
 export const fulfillment = compile(read('src/lib/order-fulfillment.ts'))
 export const progress = compile(read('src/OrderProgress.tsx'),{'./lib/order-fulfillment':fulfillment})
+const options = compile(read('src/lib/product-options.ts'))
 export const fixture = {
   id:'00000000-0000-4000-8000-000000000001',order_reference:'BL-100000',created_at:'2026-09-20T10:00:00Z',
   status:'processing',payment_status:'paid',paid_at:'2026-09-20T11:00:00Z',processing_at:'2026-09-20T12:00:00Z',shipped_at:null,delivered_at:null,
@@ -23,21 +24,21 @@ export function viewSource(name) {
   if(!node) throw Error('Missing mounted order view')
   return node.getText(ast)
 }
-export function views(expanded = false) {
+export function views(expanded = false, reorderResult = null) {
   const React=require('react')
   const {OrderFulfillmentAction}=compile(read('src/OrderFulfillmentAction.tsx'),{'./lib/admin':{advanceOrderFulfillment:async()=>{}},'./lib/order-fulfillment':fulfillment})
   const source=`import {useState,useEffect,useMemo,useRef} from 'react';
-    import {OrderProgress,OrderFulfillmentAction,orderStatusLabel} from 'fixture';
+    import {OrderProgress,OrderFulfillmentAction,orderStatusLabel,optionSummary} from 'fixture';
     const orderMoney=(cents,currency)=>new Intl.NumberFormat('en-CA',{style:'currency',currency}).format(cents/100);
     const paymentStatusLabel=s=>({paid:'Paid',awaiting_payment:'Awaiting Payment',cancelled:'Cancelled'})[s];
     const paymentMethodLabel=()=> 'Email'; const expiredReservation=()=>false;
     const PaymentConfirmationEmailAction=()=>null;
     export ${viewSource('CustomerOrders')}
     export ${viewSource('AdminOrders')}`
-  const dependencies={'fixture':{...progress,OrderFulfillmentAction,...fulfillment}}
+  const dependencies={'fixture':{...progress,OrderFulfillmentAction,...fulfillment,...options}}
   return Object.fromEntries(['CustomerOrders','AdminOrders'].map(name=>{
     let stateIndex=0
-    const react=expanded?{...React,useState:initial=>React.useState(stateIndex++===(name==='CustomerOrders'?1:11)?fixture.id:initial)}:React
+    const react={...React,useState:initial=>{const index=stateIndex++;return React.useState(expanded&&index===(name==='CustomerOrders'?1:11)?fixture.id:name==='CustomerOrders'&&index===3&&reorderResult?reorderResult:initial)}}
     const View=compile(source,{react,...dependencies})[name]
     return [name,props=>{stateIndex=0;return View(props)}]
   }))
