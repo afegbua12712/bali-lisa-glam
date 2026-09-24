@@ -23,12 +23,13 @@ export async function createManualOrder(lines: Array<{ product_id: number; quant
 export async function getManualOrderSummary(orderId: string) {
   const { data, error } = await supabase
     .from('orders')
-    .select('order_reference, subtotal_cents, shipping_cents, total_cents, currency, order_items(product_name, shade, quantity, unit_price_cents)')
+    .select('order_reference, shipping_method, subtotal_cents, shipping_cents, total_cents, currency, order_items(product_name, shade, quantity, unit_price_cents)')
     .eq('id', orderId)
     .single()
   if (error) throw error
   return data as {
     order_reference: string
+    shipping_method: string | null
     subtotal_cents: number
     shipping_cents: number
     total_cents: number

@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 
-export type OrderEmailEvent = 'order_created' | 'payment_confirmed'
+export type OrderEmailEvent = 'order_created' | 'payment_confirmed' | 'order_shipped' | 'order_delivered'
 
 export async function sendOrderEmail(orderId: string, eventType: OrderEmailEvent) {
   const { data, error } = await supabase.functions.invoke('send-order-email', {

@@ -28,14 +28,14 @@ export function views(expanded = false, reorderResult = null) {
   const React=require('react')
   const {OrderFulfillmentAction}=compile(read('src/OrderFulfillmentAction.tsx'),{'./lib/admin':{advanceOrderFulfillment:async()=>{}},'./lib/order-fulfillment':fulfillment})
   const source=`import {useState,useEffect,useMemo,useRef} from 'react';
-    import {OrderProgress,OrderFulfillmentAction,orderStatusLabel,optionSummary} from 'fixture';
+    import {ShipmentDetails,OrderProgress,OrderFulfillmentAction,orderStatusLabel,optionSummary} from 'fixture';
     const orderMoney=(cents,currency)=>new Intl.NumberFormat('en-CA',{style:'currency',currency}).format(cents/100);
     const paymentStatusLabel=s=>({paid:'Paid',awaiting_payment:'Awaiting Payment',cancelled:'Cancelled'})[s];
     const paymentMethodLabel=()=> 'Email'; const expiredReservation=()=>false;
-    const PaymentConfirmationEmailAction=()=>null;
+    const PaymentConfirmationEmailAction=()=>null; const ShipmentEmailAction=()=>null;
     export ${viewSource('CustomerOrders')}
     export ${viewSource('AdminOrders')}`
-  const dependencies={'fixture':{...progress,OrderFulfillmentAction,...fulfillment,...options}}
+  const dependencies={'fixture':{...compile(read('src/ShipmentDetails.tsx')),...progress,OrderFulfillmentAction,...fulfillment,...options}}
   return Object.fromEntries(['CustomerOrders','AdminOrders'].map(name=>{
     let stateIndex=0
     const react={...React,useState:initial=>{const index=stateIndex++;return React.useState(expanded&&index===(name==='CustomerOrders'?1:11)?fixture.id:name==='CustomerOrders'&&index===3&&reorderResult?reorderResult:initial)}}

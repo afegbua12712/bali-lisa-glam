@@ -5,7 +5,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-type EventType = 'order_created' | 'payment_confirmed'
+type EventType = 'order_created' | 'payment_confirmed' | 'order_shipped' | 'order_delivered'
 
 // Also accept the original display-name/address configuration without brackets.
 // Never log the configured sender.
@@ -100,7 +100,7 @@ Deno.serve(async (request) => {
     const body = await request.json()
     const orderId = typeof body?.order_id === 'string' ? body.order_id : ''
     const eventType = body?.event_type as EventType
-    if (!orderId || !['order_created', 'payment_confirmed'].includes(eventType)) {
+    if (!orderId || !['order_created', 'payment_confirmed', 'order_shipped', 'order_delivered'].includes(eventType)) {
       diagnostic('request_invalid', 400)
       return Response.json({ error: 'Invalid notification request' }, { status: 400, headers: corsHeaders })
     }
@@ -142,7 +142,7 @@ Deno.serve(async (request) => {
     stage = 'order_data'
     diagnostic('order_data_started')
     const [{ data: order, error: orderError }, { data: settings, error: settingsError }] = await Promise.all([
-      serviceClient.from('orders').select('id,order_reference,customer_id,status,payment_status,payment_method,payment_expires_at,currency,subtotal_cents,shipping_cents,total_cents,shipping_address,profiles(email,first_name,last_name),order_items(product_name,shade,quantity,unit_price_cents)').eq('id', orderId).single(),
+      serviceClient.from('orders').select('id,order_reference,customer_id,status,shipment_carrier,tracking_number,shipped_at,delivered_at,payment_status,payment_method,payment_expires_at,currency,subtotal_cents,shipping_cents,total_cents,shipping_address,profiles(email,first_name,last_name),order_items(product_name,shade,quantity,unit_price_cents)').eq('id', orderId).single(),
       serviceClient.from('website_settings').select('business_name,business_email,whatsapp_number').eq('id', true).single(),
     ])
     if (orderError || !order || settingsError || !settings) throw new Error('Authoritative order data is unavailable')
@@ -159,7 +159,10 @@ Deno.serve(async (request) => {
     const lines = order.order_items ?? []
     const support = [settings.business_email, settings.whatsapp_number].filter(Boolean).join(' · ') || 'Reply to this email for support.'
     const international = (delivery.country ?? '').trim().toLowerCase() !== 'canada'
-    const subject = eventType === 'order_created'
+    const shipment = eventType === 'order_shipped' || eventType === 'order_delivered'
+    if (shipment && (order.payment_status !== 'paid' || (eventType === 'order_shipped' ? !['shipped','delivered'].includes(order.status) : order.status !== 'delivered'))) throw new Error('Shipment status is unavailable')
+    const shipmentText = shipment ? [eventType === 'order_shipped' ? 'Your order has shipped.' : 'Your order has been delivered.', order.shipment_carrier ? 'Carrier / delivery service: ' + order.shipment_carrier : '', order.tracking_number ? 'Tracking number / reference: ' + order.tracking_number : 'No tracking provided.', order.shipped_at ? 'Shipped: ' + order.shipped_at : '', eventType === 'order_delivered' && order.delivered_at ? 'Delivered: ' + order.delivered_at : ''].filter(Boolean).join('\n') : ''
+    const subject = shipment ? 'Bali & Lisa Glam - Order ' + order.order_reference + (eventType === 'order_shipped' ? ' shipped' : ' delivered') : eventType === 'order_created'
       ? `Bali & Lisa Glam — Order ${order.order_reference} received`
       : `Bali & Lisa Glam — Payment confirmed for Order ${order.order_reference}`
 
@@ -176,10 +179,10 @@ Deno.serve(async (request) => {
     const deliveryHtml = addressLines(delivery).map(line => escapeHtml(line)).join('<br>')
     const deliveryText = addressLines(delivery).join('\n')
     const deadline = order.payment_expires_at ? new Date(order.payment_expires_at).toLocaleString('en-CA', { timeZone: 'UTC', timeZoneName: 'short' }) : null
-    const lead = eventType === 'order_created'
+    const lead = shipment ? escapeHtml(shipmentText).replaceAll('\n', '<br>') : eventType === 'order_created'
       ? 'We received your order. Its payment status is <strong>Awaiting payment</strong>.'
       : 'Your payment has been confirmed. Your order will now proceed to preparation and fulfillment.'
-    const plainLead = eventType === 'order_created'
+    const plainLead = shipment ? shipmentText : eventType === 'order_created'
       ? 'We received your order. Payment status: Awaiting payment.'
       : 'Your payment has been confirmed. Your order will now proceed to preparation and fulfillment.'
     const paymentNote = eventType === 'order_created'

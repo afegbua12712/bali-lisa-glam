@@ -36,10 +36,10 @@ test('fulfillment action locks repeated clicks and sends expected persisted stat
     const {OrderFulfillmentAction}=compile(read('src/OrderFulfillmentAction.tsx'),{
       react:{useRef:v=>hooks[cursor++]??={current:v},useState:v=>{const i=cursor++;if(!(i in hooks))hooks[i]=v;return[hooks[i],v=>hooks[i]=v]}},
       'react/jsx-runtime':{jsx,jsxs:jsx},'./lib/order-fulfillment':fulfillment,
-      './lib/admin':{advanceOrderFulfillment:async(...args)=>{assert.deepEqual(args,[fixture.id,'processing','shipped']);calls++;await wait}},
+      './lib/admin':{advanceOrderFulfillment:async(...args)=>{assert.deepEqual(args,[fixture.id,'processing','shipped','','']);calls++;await wait}},
     })
     const render=()=>{cursor=0;return OrderFulfillmentAction({order:fixture,refresh:async()=>{refreshes++}})}
-    const button=render().props.children[0]; const pending=button.props.onClick(); await button.props.onClick()
+    const tree=render(); tree.props.children[0].props.onClick(); assert.equal(calls,0); const form=tree.props.children[1].props.children; const pending=form.props.onSubmit({preventDefault(){}}); await form.props.onSubmit({preventDefault(){}})
     assert.equal(calls,1);assert.equal(render().props.children[0].props.disabled,true)
     resolve();await pending;assert.equal(refreshes,1);assert.equal(render().props.children[0].props.disabled,false)
   } finally {globalThis.window=oldWindow}

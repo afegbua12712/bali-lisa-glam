@@ -1,3 +1,5 @@
+import { ShipmentDetails } from "./ShipmentDetails";
+import { ShipmentEmailAction } from "./ShipmentEmailAction";
 import { OrderProgress } from "./OrderProgress";
 import { OrderFulfillmentAction } from "./OrderFulfillmentAction";
 import { orderStatusLabel } from "./lib/order-fulfillment";
@@ -1085,9 +1087,9 @@ function Checkout({ cart, subtotal, back, user, customerId, signIn, stockError }
   const freeShippingThresholdCents = isCanada
     ? settings?.free_shipping_threshold_cents
     : settings?.international_free_shipping_threshold_cents;
-  const shippingConfigured = Number.isFinite(standardShippingCents);
+  const shippingConfigured = Number.isSafeInteger(standardShippingCents) && standardShippingCents >= 0;
   const shipping = shippingConfigured
-    ? Number.isFinite(freeShippingThresholdCents) && subtotal * 100 >= freeShippingThresholdCents
+    ? Number.isSafeInteger(freeShippingThresholdCents) && freeShippingThresholdCents >= 0 && Math.round(subtotal * 100) >= freeShippingThresholdCents
       ? 0
       : standardShippingCents / 100
     : null;
@@ -1124,6 +1126,7 @@ ORDER DETAILS
 
 ${orderLines}
 
+Shipping method: ${orderSummary.shipping_method ?? "Not recorded"}
 Shipping: ${formatOrderTotal(orderSummary.shipping_cents)}
 Order Total: ${formatOrderTotal(orderSummary.total_cents)}
 
@@ -1181,7 +1184,7 @@ Thank you.`;
         setError("Enter a valid Canadian postal code.");
         return;
       }
-      if (!isCanada && !shippingConfigured) {
+      if (!shippingConfigured) {
         setError("Shipping is not configured for this international destination. Please contact Bali & Lisa Glam before ordering.");
         return;
       }
@@ -1408,6 +1411,7 @@ Thank you.`;
         </form>
         <aside className="summary">
           <h3>Order summary</h3>
+          <section className="shipping-method" aria-label="Shipping method" aria-live="polite"><h4>{isCanada ? 'Standard Shipping' : 'International Shipping'}</h4><p>{isCanada ? 'Canada: estimated 1 to 3 business days after dispatch.' : 'Estimated up to approximately 14 business days after dispatch.'}</p><p>Dispatch generally takes 1 to 2 business days after payment confirmation. Delivery times are estimates, not guarantees.</p>{!isCanada && <p>Destination-country customs, duties and import charges may apply separately.</p>}</section>
           {cart.map((x: CartLine) => (
             <div className="summary-line" key={cartLineKey(x)}>
               <img src={x.image} alt="" />
@@ -1598,7 +1602,7 @@ function CustomerOrders({ orders, refresh, reorder, goShop }: any) {
         <div className="portal-order-actions"><button className="btn" aria-label={`Reorder ${order.order_reference}`} disabled={Boolean(busy) || !reorder || !itemCount} onClick={() => void repeat(order.id)}>{busy === order.id ? "Checking availability…" : "Reorder"}</button><small>Add available items to your bag at current prices.</small></div>
         <div id={`details-${order.order_reference}`} hidden={!expanded} className="customer-order-detail">
           {expanded && <>
-            <OrderProgress order={order} />
+            <OrderProgress order={order} /><ShipmentDetails order={order} />
             <p>Payment method: {paymentMethodLabel(order.payment_method)}</p>
             <p>{order.status === "refunded" ? "This order was refunded." : order.payment_status === "paid" ? "Payment successful — your payment has been confirmed." : order.payment_status === "cancelled" ? "This unpaid order was cancelled." : "Payment awaiting confirmation. If you have sent your receipt, no further action is required unless we contact you."}</p>
             {order.payment_status === "awaiting_payment" && order.payment_expires_at && <p>Payment requested before {new Date(order.payment_expires_at).toLocaleString("en-CA")}.</p>}
@@ -2142,12 +2146,12 @@ function AdminOrders({ orders, refresh, refreshEmails, note }: any) {
         <header className="order-card-header"><label className="order-select"><input type="checkbox" checked={selected.includes(o.id)} onChange={() => toggleSelected(o.id)} /><span className="sr-only">Select order {o.order_reference}</span></label><div><p>Order reference</p><h2>{o.order_reference}</h2></div><span className={`status-badge payment-${o.payment_status ?? "awaiting_payment"}`}>Payment: {paymentStatusLabel(o.payment_status)}</span></header>
         <div className="order-meta"><div><span>Customer</span><b>{customerName}</b><small>{o.profiles?.email ?? "No email available"}</small></div><div><span>Date</span><b>{new Date(o.created_at).toLocaleString("en-CA")}</b></div><div><span>Total</span><b>{orderMoney(o.total_cents, o.currency ?? "CAD")}</b></div><div><span>Payment method</span><b>{paymentMethodLabel(o.payment_method)}</b></div></div>
         <div className="order-products"><h3>Products</h3><ul>{o.order_items?.map((item: any) => <li key={`${o.id}-${item.product_name}-${item.shade ?? "standard"}`}><b>{item.product_name}</b>{item.shade && <span>Options: {item.shade}</span>}<span>Quantity: {item.quantity} · {orderMoney(item.unit_price_cents, o.currency ?? "CAD")} each · Subtotal: {orderMoney(item.unit_price_cents * item.quantity, o.currency ?? "CAD")}</span></li>)}</ul></div>
-        <OrderProgress order={o} />
+        <OrderProgress order={o} /><ShipmentDetails order={o} />
         {detailId === o.id && <div className="order-detail"><div><span>Delivery</span><b>{[address.address, address.unit, `${address.city ?? ""}${address.province ? `, ${address.province}` : ""}`, address.postal_code, address.country].filter(Boolean).join(" · ")}</b><small>{address.phone ? `Phone: ${address.phone}` : ""}</small></div><div><span>Payment</span><b>{paymentMethodLabel(o.payment_method)} · {paymentStatusLabel(o.payment_status)}</b><small>{o.paid_at ? `Paid: ${new Date(o.paid_at).toLocaleString("en-CA")}` : o.payment_expires_at ? `Payment requested before: ${new Date(o.payment_expires_at).toLocaleString("en-CA")}` : "Not yet paid"}</small></div><div><span>Email notifications</span><b>Order email: {orderEmail?.status ?? "not sent"}</b><small>{o.payment_status === "paid" ? `Payment email: ${paymentEmail?.status ?? "not sent"}` : "Payment email is sent only after payment confirmation."}</small></div><div><span>Inventory</span><b>{o.inventory_reservation_status === "reserved" ? "Reserved for this unpaid order" : o.inventory_reservation_status === "restored" ? "Restored to stock" : o.inventory_reservation_status === "committed" ? "Committed to paid order" : "Legacy order — not tracked"}</b><small>{o.inventory_restored_at ? `Restored: ${new Date(o.inventory_restored_at).toLocaleString("en-CA")}` : o.cancellation_reason ?? ""}</small></div><div><span>Totals</span><b>Shipping {orderMoney(o.shipping_cents, o.currency ?? "CAD")} · Total {orderMoney(o.total_cents, o.currency ?? "CAD")}</b><small>Order status: {orderStatusLabel(o.status)}</small></div></div>}
         <div className="order-actions"><button className="product-table-action" onClick={() => setDetailId(detailId === o.id ? null : o.id)}>{detailId === o.id ? "Hide details" : "View details"}</button><OrderFulfillmentAction order={o} refresh={refresh} />
           {o.payment_status === "awaiting_payment" && <button type="button" className="btn dark order-payment-action" onClick={async () => { if (confirm(`Confirm that you independently verified payment for Order ${o.order_reference}?`)) { try { await confirmManualPayment(o.id); await refresh(); try { await sendOrderEmail(o.id, "payment_confirmed"); await refresh(); note("Payment marked as paid and confirmation email sent."); } catch (emailError) { logOperationFailure("Payment confirmation email failed:", emailError); await refresh(); note("Payment is confirmed, but the email could not be sent."); } } catch (error) { logOperationFailure("Payment confirmation failed:", error); note("Payment could not be confirmed."); } } }}>Mark as Paid</button>}
           {orderEmail?.status === "failed" && <button type="button" className="product-table-action" onClick={() => void retryEmail("order_created")}>Retry order email</button>}
-          {o.payment_status === "paid" && <PaymentConfirmationEmailAction orderId={o.id} paymentStatus={o.payment_status} notification={paymentEmail} refresh={refreshEmails} />}
+          <ShipmentEmailAction order={o} refresh={refreshEmails} />{o.payment_status === "paid" && <PaymentConfirmationEmailAction orderId={o.id} paymentStatus={o.payment_status} notification={paymentEmail} refresh={refreshEmails} />}
           {o.payment_status === "awaiting_payment" && o.inventory_reservation_status === "reserved" && <button type="button" className="delete-product product-table-action" disabled={releasing !== null} onClick={() => void releaseReservation(o)}>{releasing === o.id ? "Releasing..." : expiredReservation(o, now) ? "Cancel expired reservation & restore stock" : "Cancel & restore stock"}</button>}
           {view === "active" ? <button className="product-table-action" onClick={async () => { try { await archiveOrders([o.id]); await refresh(); note("Order archived."); } catch (error) { logOperationFailure("Order archive failed:", error); note("Order could not be archived."); } }}>Archive order</button> : <button className="product-table-action restore-product" onClick={async () => { try { await restoreOrder(o.id); await refresh(); note("Order restored."); } catch (error) { logOperationFailure("Order restore failed:", error); note("Order could not be restored."); } }}>Restore order</button>}
           <button className="delete-product product-table-action" disabled={o.inventory_reservation_status === "reserved"} title={o.inventory_reservation_status === "reserved" ? "Cancel this unpaid order and restore stock before deleting it." : undefined} onClick={async () => { if (confirm(`Permanently delete Order ${o.order_reference}? This cannot be undone.`)) { try { await deleteOrders([o.id]); await refresh(); note("Order permanently deleted."); } catch (error) { logOperationFailure("Order deletion failed:", error); note("Order could not be deleted. Cancel unpaid reservations before deletion."); } } }}>Delete order permanently</button></div>
@@ -2205,6 +2209,9 @@ function AdminSettings({ settings, setSettings, save }: any) {
           <input
             type={key.includes("cents") ? "number" : "text"}
             min={key.includes("cents") ? 0 : undefined}
+            step={key.includes("cents") ? 1 : undefined}
+            max={key.includes("cents") ? 2147483647 : undefined}
+            required={key.includes("cents") && !key.startsWith("international_")}
             value={settings[key] ?? ""}
             onChange={(e) =>
               setSettings({
